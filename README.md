@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# エモ・スイッチ
 
-## Getting Started
+「書けない」を「刺さる」へ。  
+プロンプト不要の、感情変換エンジン。
 
-First, run the development server:
+## 技術スタック
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Next.js 16 (App Router / TypeScript)
+- Vercel AI SDK + Gemini 1.5 (Flash / Pro切替)
+- OpenAI Whisper API（音声入力の文字起こし）
+- Supabase（クライアント / サーバークライアント雛形）
+- shadcn/ui + Framer Motion + Lucide React
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## セットアップ
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. 依存関係をインストール
+   ```bash
+   npm install
+   ```
+2. 環境変数を作成
+   ```bash
+   cp .env.example .env.local
+   ```
+3. `.env.local` にキーを設定
+   - `GOOGLE_GENERATIVE_AI_API_KEY`
+   - `OPENAI_API_KEY`
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - （任意）Stripe Payment Links 用 `NEXT_PUBLIC_STRIPE_CHECKOUT_*`（`/.env.example` 参照）
+4. 開発サーバー起動
+   ```bash
+   npm run dev
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 画面構成
 
-## Learn More
+| パス | 内容 |
+|------|------|
+| `/` | LP（デモ枠・「使ってみる」） |
+| `/home` | メイン作成（3案＋ハッシュタグ・カメレオンUI・レバー音） |
+| `/archive` | 履歴・採用案・いいね記録（現状は localStorage） |
+| `/ghost` | マイ・ゴースト（プロフィールURL・NGワード。Vector連携は準備中） |
+| `/plans` | 料金プラン（月払い / 年払い 20%OFF・Stripe リンク） |
 
-To learn more about Next.js, take a look at the following resources:
+## 実装済みAPI
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `POST /api/generate`
+  - 入力: `draft`, `emotion`, `speedMode`
+  - Geminiで1文のSNS向けコピーをストリーミング生成（レガシー）
+- `POST /api/generate-triple`
+  - 入力: `draft`, `emotion`, `speedMode`, `intensity`, `ngWords`
+  - JSONで **3案 + ハッシュタグ**（+ 任意ヒント）を一括生成
+- `POST /api/transcribe`
+  - 入力: `FormData(audio)`
+  - Whisperで日本語文字起こし
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Supabase 拡張メモ
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `pgvector` を有効化して「My Ghost（文体学習）」の埋め込み保存に利用
+- 重い処理（トレンド分析や定期学習）は Supabase Edge Functions へ分離
