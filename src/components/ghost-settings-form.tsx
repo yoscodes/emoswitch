@@ -7,27 +7,44 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { loadGhostSettings, saveGhostSettings } from "@/lib/ghost-storage";
+import { fetchGhostSettings, updateGhostSettings } from "@/lib/api-client";
 
 export function GhostSettingsForm() {
   const [profileUrl, setProfileUrl] = useState("");
   const [ngRaw, setNgRaw] = useState("");
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const g = loadGhostSettings();
-    setProfileUrl(g.profileUrl);
-    setNgRaw(g.ngWords.join("\n"));
+    void (async () => {
+      try {
+        const g = await fetchGhostSettings();
+        setProfileUrl(g.profileUrl);
+        setNgRaw(g.ngWords.join("\n"));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "ゴースト設定の取得に失敗しました");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const ngWords = ngRaw
       .split(/[\n,、]/)
       .map((s) => s.trim())
       .filter(Boolean);
-    saveGhostSettings({ profileUrl: profileUrl.trim(), ngWords });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setError(null);
+    try {
+      const savedSettings = await updateGhostSettings({ profileUrl: profileUrl.trim(), ngWords });
+      setProfileUrl(savedSettings.profileUrl);
+      setNgRaw(savedSettings.ngWords.join("\n"));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ゴースト設定の保存に失敗しました");
+    }
   };
 
   return (
@@ -61,6 +78,7 @@ export function GhostSettingsForm() {
             value={profileUrl}
             onChange={(e) => setProfileUrl(e.target.value)}
             className="mt-2"
+            disabled={loading}
           />
         </CardContent>
       </Card>
@@ -78,10 +96,12 @@ export function GhostSettingsForm() {
             onChange={(e) => setNgRaw(e.target.value)}
             placeholder={"例:\nマジで\n〜っす\n炎上"}
             className="min-h-32 font-mono text-sm"
+            disabled={loading}
           />
-          <Button type="button" onClick={handleSave}>
+          <Button type="button" onClick={() => void handleSave()} disabled={loading}>
             {saved ? "保存しました" : "保存する"}
           </Button>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </CardContent>
       </Card>
     </div>

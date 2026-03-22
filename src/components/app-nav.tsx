@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Archive, Ghost, Home, Zap } from "lucide-react";
 import { motion } from "framer-motion"; // アニメーション用
 
+import { AuthActions } from "@/components/auth-actions";
 import { CreditStatus } from "@/components/credit-status";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +58,9 @@ export function AppNav() {
             エモ・スイッチ
           </span>
         </Link>
+        <div className="md:hidden">
+          <AuthActions compact />
+        </div>
 
         {/* ナビゲーション */}
         <ul className="flex flex-1 justify-around md:col-start-2 md:row-start-1 md:flex-none md:justify-center md:gap-2 relative">
@@ -91,9 +95,10 @@ export function AppNav() {
         </ul>
 
         {/* クレジット表示 */}
-        <div className="hidden md:col-start-3 md:flex md:justify-end items-center gap-3">
+        <div className="hidden items-center gap-3 md:col-start-3 md:flex md:justify-end">
           <div className="mr-2 h-4 w-px bg-border" /> {/* 区切り線 */}
           <CreditStatus />
+          <AuthActions />
         </div>
       </div>
     </nav>

@@ -1,24 +1,50 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import { Copy, Trash2, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  DATA_SYNC_EVENT,
+  fetchGenerations,
+  patchGenerationRecord,
+  removeGenerationRecord,
+} from "@/lib/api-client";
 import { EMOTION_LABELS } from "@/lib/emotions";
-import { listGenerations, updateGeneration } from "@/lib/generation-storage";
+import { writeReuseSession } from "@/lib/reuse-session";
 import type { GenerationRecord } from "@/lib/types";
 
 export function ArchivePanel() {
   const [rows, setRows] = useState<GenerationRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const refresh = () => setRows(listGenerations());
+  const refresh = useCallback(async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      setRows(await fetchGenerations());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "履歴の取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    refresh();
-  }, []);
+    void refresh();
+    const onSync = () => {
+      void refresh();
+    };
+    window.addEventListener(DATA_SYNC_EVENT, onSync);
+    return () => window.removeEventListener(DATA_SYNC_EVENT, onSync);
+  }, [refresh]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-8 pb-28 md:px-6">
@@ -29,10 +55,22 @@ export function ArchivePanel() {
         </p>
       </header>
 
-      {rows.length === 0 ? (
+      {loading ? (
+        <ul className="space-y-4">
+          {[0, 1, 2].map((item) => (
+            <li key={item}>
+              <ArchiveRowSkeleton />
+            </li>
+          ))}
+        </ul>
+      ) : error ? (
+        <Card>
+          <CardContent className="py-12 text-center text-sm text-destructive">{error}</CardContent>
+        </Card>
+      ) : rows.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            まだ履歴がありません。
+            まだ記録がありません。最初の投稿をしてみましょう。
             <Link href="/home" className="px-1 font-medium text-primary underline-offset-4 hover:underline">
               作成画面
             </Link>
@@ -48,7 +86,11 @@ export function ArchivePanel() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <ArchiveRow row={row} onUpdate={refresh} />
+              <ArchiveRow
+                key={`${row.id}-${row.likes ?? "n"}-${row.memo ?? ""}`}
+                row={row}
+                onUpdate={refresh}
+              />
             </motion.li>
           ))}
         </ul>
@@ -62,27 +104,70 @@ function ArchiveRow({
   onUpdate,
 }: {
   row: GenerationRecord;
-  onUpdate: () => void;
+  onUpdate: () => Promise<void> | void;
 }) {
-  const [likesInput, setLikesInput] = useState(row.likes != null ? String(row.likes) : "");
-  const [saved, setSaved] = useState(false);
+  const router = useRouter();
+  const [likesInput, setLikesInput] = useState(
+    () => (row.likes != null ? String(row.likes) : ""),
+  );
+  const [memoInput, setMemoInput] = useState(() => row.memo ?? "");
+  const [likesSaved, setLikesSaved] = useState(false);
+  const [memoSaved, setMemoSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    setLikesInput(row.likes != null ? String(row.likes) : "");
-  }, [row.id, row.likes]);
-
-  const adopted =
+  const adoptedBody =
     row.selectedIndex != null && row.variants[row.selectedIndex]
       ? row.variants[row.selectedIndex]
-      : "未選択";
+      : null;
+  const adoptedDisplay = adoptedBody ?? "未選択";
 
   const handleSaveLikes = () => {
     const n = likesInput.trim() === "" ? null : Number.parseInt(likesInput, 10);
     if (likesInput.trim() !== "" && Number.isNaN(n)) return;
-    updateGeneration(row.id, { likes: n });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-    onUpdate();
+    void patchGenerationRecord(row.id, { likes: n })
+      .then(() => {
+        setLikesSaved(true);
+        setTimeout(() => setLikesSaved(false), 1500);
+        void onUpdate();
+      })
+      .catch(() => undefined);
+  };
+
+  const handleSaveMemo = () => {
+    const trimmed = memoInput.trim();
+    void patchGenerationRecord(row.id, { memo: trimmed === "" ? null : trimmed })
+      .then(() => {
+        setMemoSaved(true);
+        setTimeout(() => setMemoSaved(false), 1500);
+        void onUpdate();
+      })
+      .catch(() => undefined);
+  };
+
+  const handleReuseSettings = () => {
+    writeReuseSession({
+      draft: row.draft,
+      emotion: row.emotion,
+      intensity: row.intensity,
+      speedMode: row.speedMode ?? "flash",
+    });
+    router.push("/home");
+  };
+
+  const handleCopyAdopted = async () => {
+    if (!adoptedBody) return;
+    try {
+      await navigator.clipboard.writeText(adoptedBody);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleDelete = () => {
+    if (!window.confirm("この履歴を削除しますか？この操作は取り消せません。")) return;
+    void removeGenerationRecord(row.id).then(() => void onUpdate());
   };
 
   const adviceText = getAdviceText(row.likes);
@@ -90,18 +175,61 @@ function ArchiveRow({
   return (
     <Card>
       <CardHeader className="space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <CardTitle className="text-base">{EMOTION_LABELS[row.emotion]}</CardTitle>
-          <span className="text-xs text-muted-foreground">
-            {new Date(row.createdAt).toLocaleString("ja-JP")}
-          </span>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="text-base">{EMOTION_LABELS[row.emotion]}</CardTitle>
+            <span className="text-xs text-muted-foreground">
+              {new Date(row.createdAt).toLocaleString("ja-JP")}
+            </span>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="shrink-0 text-muted-foreground hover:text-destructive"
+            onClick={handleDelete}
+            aria-label="この履歴を削除"
+          >
+            <Trash2 className="size-4" />
+          </Button>
         </div>
         <p className="text-xs text-muted-foreground line-clamp-2">素材: {row.draft}</p>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="default" onClick={handleReuseSettings}>
+            <Wand2 className="mr-1.5 size-3.5" />
+            この設定で作成
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!adoptedBody}
+            onClick={() => void handleCopyAdopted()}
+          >
+            <Copy className="mr-1.5 size-3.5" />
+            {copied ? "コピーしました" : "採用案をコピー"}
+          </Button>
+        </div>
         <div>
           <p className="mb-1 font-medium text-muted-foreground">採用した案</p>
-          <p className="rounded-xl border bg-muted/30 p-3 leading-relaxed">{adopted}</p>
+          <p className="rounded-xl border bg-muted/30 p-3 leading-relaxed">{adoptedDisplay}</p>
+        </div>
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground" htmlFor={`memo-${row.id}`}>
+            一言メモ（任意）
+          </label>
+          <Textarea
+            id={`memo-${row.id}`}
+            placeholder="例: ハッシュタグを変えた／夜20時に投稿…"
+            value={memoInput}
+            onChange={(e) => setMemoInput(e.target.value)}
+            className="min-h-[72px] resize-y text-sm"
+          />
+          <Button type="button" size="sm" variant="secondary" onClick={handleSaveMemo}>
+            {memoSaved ? "保存しました" : "メモを保存"}
+          </Button>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div className="space-y-1">
@@ -119,13 +247,29 @@ function ArchiveRow({
             />
           </div>
           <Button type="button" size="sm" onClick={handleSaveLikes}>
-            {saved ? "保存しました" : "記録"}
+            {likesSaved ? "保存しました" : "記録"}
           </Button>
         </div>
         <p className="rounded-lg bg-primary/5 p-3 text-xs text-muted-foreground">{adviceText}</p>
         <p className="text-xs text-muted-foreground">
           タグ: {row.hashtags.join(" ")}
         </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ArchiveRowSkeleton() {
+  return (
+    <Card>
+      <CardHeader className="space-y-3">
+        <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+        <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="h-9 w-40 animate-pulse rounded bg-muted" />
+        <div className="h-20 animate-pulse rounded-xl bg-muted/60" />
+        <div className="h-24 animate-pulse rounded-xl bg-muted/60" />
       </CardContent>
     </Card>
   );

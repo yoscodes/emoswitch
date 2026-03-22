@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { ArrowRight, Play } from "lucide-react";
 
+import { AuthActions } from "@/components/auth-actions";
 import { buttonVariants } from "@/components/ui/button";
-import { CreditStatus } from "@/components/credit-status";
 import { cn } from "@/lib/utils";
 
 export function LandingPage() {
@@ -15,10 +15,12 @@ export function LandingPage() {
       <header className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-6">
         <span className="text-lg font-bold tracking-tight">エモ・スイッチ</span>
         <div className="flex items-center gap-2">
-          <CreditStatus />
           <Link href="/home" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
             アプリへ
           </Link>
+          <div className="hidden md:block">
+            <AuthActions />
+          </div>
         </div>
       </header>
 
@@ -53,6 +55,9 @@ export function LandingPage() {
             >
               マイ・ゴースト
             </Link>
+          </div>
+          <div className="md:hidden">
+            <AuthActions />
           </div>
         </section>
 

@@ -30,10 +30,12 @@ export function saveGeneration(entry: Omit<GenerationRecord, "id" | "createdAt">
     draft: entry.draft,
     emotion: entry.emotion,
     intensity: entry.intensity,
+    speedMode: entry.speedMode,
     variants: entry.variants,
     hashtags: entry.hashtags,
     selectedIndex: entry.selectedIndex ?? null,
     likes: entry.likes ?? null,
+    memo: entry.memo ?? null,
     adviceHint: entry.adviceHint ?? null,
   };
   const next = [row, ...list.filter((g) => g.id !== id)];
@@ -43,9 +45,15 @@ export function saveGeneration(entry: Omit<GenerationRecord, "id" | "createdAt">
 
 export function updateGeneration(
   id: string,
-  patch: Partial<Pick<GenerationRecord, "selectedIndex" | "likes">>,
+  patch: Partial<Pick<GenerationRecord, "selectedIndex" | "likes" | "memo">>,
 ): void {
   const list = loadRaw();
   const next = list.map((g) => (g.id === id ? { ...g, ...patch } : g));
+  localStorage.setItem(KEY, JSON.stringify(next));
+}
+
+export function deleteGeneration(id: string): void {
+  const list = loadRaw();
+  const next = list.filter((g) => g.id !== id);
   localStorage.setItem(KEY, JSON.stringify(next));
 }

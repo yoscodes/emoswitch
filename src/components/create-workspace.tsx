@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { BookOpen, Check, Copy, Heart, Palette, Sparkles, Swords } from "lucide-react";
 
@@ -12,10 +13,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  ensureDemoWorkspace,
+  fetchCreditSummary,
+  fetchGhostSettings,
+  patchGenerationRecord,
+  saveGenerationRecord,
+} from "@/lib/api-client";
 import { CHAMELEON } from "@/lib/chameleon";
 import type { EmotionTone } from "@/lib/emotions";
-import { saveGeneration, updateGeneration } from "@/lib/generation-storage";
-import { loadGhostSettings } from "@/lib/ghost-storage";
+import { parseEmotionFromQuery, readAndClearReuseSession } from "@/lib/reuse-session";
 import { playSwitchClick } from "@/lib/switch-sound";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +41,7 @@ type TripleResponse = {
 };
 
 export function CreateWorkspace() {
+  const router = useRouter();
   const [draft, setDraft] = useState("");
   const [emotion, setEmotion] = useState<EmotionTone>("empathy");
   const [intensity, setIntensity] = useState(70);
@@ -49,6 +57,55 @@ export function CreateWorkspace() {
   const [currentId, setCurrentId] = useState<string | null>(null);
 
   const chameleon = CHAMELEON[emotion];
+
+  useEffect(() => {
+    const fromSession = readAndClearReuseSession();
+    if (fromSession) {
+      setDraft(fromSession.draft);
+      setEmotion(fromSession.emotion);
+      setIntensity(fromSession.intensity);
+      setSpeedMode(fromSession.speedMode);
+      router.replace("/home", { scroll: false });
+      return;
+    }
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const qEmotion = parseEmotionFromQuery(sp.get("emotion"));
+    const qIntensity = sp.get("intensity");
+    const qSpeed = sp.get("speed");
+    const qDraft = sp.get("draft");
+    let changed = false;
+    if (qEmotion) {
+      setEmotion(qEmotion);
+      changed = true;
+    }
+    if (qIntensity != null && qIntensity !== "") {
+      const n = Number.parseInt(qIntensity, 10);
+      if (!Number.isNaN(n) && n >= 0 && n <= 100) {
+        setIntensity(n);
+        changed = true;
+      }
+    }
+    if (qSpeed === "flash" || qSpeed === "pro") {
+      setSpeedMode(qSpeed);
+      changed = true;
+    }
+    if (qDraft != null && qDraft !== "") {
+      try {
+        setDraft(decodeURIComponent(qDraft));
+        changed = true;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (changed) {
+      router.replace("/home", { scroll: false });
+    }
+  }, [router]);
+
+  useEffect(() => {
+    void ensureDemoWorkspace();
+  }, []);
 
   const handleUploadAudio = async (file: File) => {
     setUploading(true);
@@ -78,8 +135,13 @@ export function CreateWorkspace() {
     setCurrentId(null);
     playSwitchClick();
 
-    const ghost = loadGhostSettings();
     try {
+      await ensureDemoWorkspace();
+      const [ghost, credit] = await Promise.all([fetchGhostSettings(), fetchCreditSummary()]);
+      if (credit.remaining <= 0) {
+        throw new Error("クレジットが残っていません。");
+      }
+
       const response = await fetch("/api/generate-triple", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -98,14 +160,16 @@ export function CreateWorkspace() {
       setHashtags(data.hashtags);
       setAdviceHint(data.adviceHint ?? null);
 
-      const row = saveGeneration({
+      const row = await saveGenerationRecord({
         draft: draft.trim(),
         emotion,
         intensity,
+        speedMode,
         variants: data.variants,
         hashtags: data.hashtags,
         selectedIndex: null,
         likes: null,
+        memo: null,
         adviceHint: data.adviceHint ?? null,
       });
       setCurrentId(row.id);
@@ -119,7 +183,7 @@ export function CreateWorkspace() {
   const selectVariant = (index: number) => {
     setSelectedIndex(index);
     if (currentId) {
-      updateGeneration(currentId, { selectedIndex: index });
+      void patchGenerationRecord(currentId, { selectedIndex: index }).catch(() => undefined);
     }
   };
 
