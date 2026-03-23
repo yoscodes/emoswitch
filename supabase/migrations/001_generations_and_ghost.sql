@@ -15,9 +15,18 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
   display_name text,
+  default_emotion text not null default 'empathy',
+  writing_style text not null default 'casual',
+  sentence_style text not null default 'friendly',
   is_demo boolean not null default false,
   created_at timestamptz not null default timezone('utc', now()),
-  updated_at timestamptz not null default timezone('utc', now())
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint profiles_default_emotion_check
+    check (default_emotion in ('empathy', 'toxic', 'mood', 'useful', 'minimal')),
+  constraint profiles_writing_style_check
+    check (writing_style in ('polite', 'casual', 'passionate')),
+  constraint profiles_sentence_style_check
+    check (sentence_style in ('desumasu', 'friendly'))
 );
 
 create table if not exists public.ghost_settings (

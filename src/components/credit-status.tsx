@@ -2,12 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { Zap } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { DATA_SYNC_EVENT, fetchCreditSummary } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
-export function CreditStatus({ className }: { className?: string }) {
+export function CreditStatus({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   const [remaining, setRemaining] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -44,14 +51,28 @@ export function CreditStatus({ className }: { className?: string }) {
   }, [refresh]);
 
   return (
-    <div className={cn("flex items-center gap-2", className)}>
-      <div className="rounded-full border bg-background/80 px-3 py-1 text-xs font-medium text-muted-foreground">
-        クレジット残り{" "}
-        <span className="font-semibold text-foreground">{remaining == null ? "..." : `${remaining}回`}</span>
+    <div
+      className={cn(
+        "inline-flex items-center overflow-hidden rounded-full border bg-background/85 shadow-sm backdrop-blur-sm",
+        compact ? "h-9" : "h-10",
+        className,
+      )}
+    >
+      <div className={cn("flex items-center gap-2 px-3 text-xs font-medium", compact ? "pr-2" : "pr-3")}>
+        <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Zap className="size-3.5" />
+        </span>
+        <span className="whitespace-nowrap text-muted-foreground">
+          {!compact ? "残り " : ""}
+          <span className="font-semibold text-foreground">{remaining == null ? "..." : `${remaining}回`}</span>
+        </span>
       </div>
       <Link
         href="/plans"
-        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full")}
+        className={cn(
+          buttonVariants({ variant: "ghost", size: "sm" }),
+          "h-full rounded-none border-l border-border px-3 text-xs font-medium hover:bg-muted",
+        )}
       >
         追加
       </Link>

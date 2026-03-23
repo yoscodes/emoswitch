@@ -1,7 +1,7 @@
 import type { User } from "@supabase/supabase-js";
 import type { EmotionTone } from "@/lib/emotions";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import type { CreditSummary, GenerationRecord, GhostSettings } from "@/lib/types";
+import type { CreditSummary, GenerationRecord, GhostSettings, UserProfileSettings } from "@/lib/types";
 
 export const DEMO_USER_ID = "11111111-1111-4111-8111-111111111111";
 export const DEMO_USER_EMAIL = "demo@emoswitch.local";
@@ -166,6 +166,15 @@ type AppActor = {
   mode: "auth" | "demo";
 };
 
+type DbProfileRow = {
+  id: string;
+  email: string;
+  display_name: string | null;
+  default_emotion: EmotionTone;
+  writing_style: "polite" | "casual" | "passionate";
+  sentence_style: "desumasu" | "friendly";
+};
+
 function isoDaysAgo(days: number): string {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
@@ -203,6 +212,20 @@ function getUserDisplayName(user: User): string | null {
   }
 
   return null;
+}
+
+async function requireProfileRow(userId: string): Promise<DbProfileRow> {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id, email, display_name, default_emotion, writing_style, sentence_style")
+    .eq("id", userId)
+    .single<DbProfileRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
 }
 
 function getBearerToken(request: Request): string | null {
@@ -401,6 +424,26 @@ export async function resolveRequestActor(request: Request): Promise<AppActor> {
   return { userId, mode: "auth" };
 }
 
+export async function requireAuthenticatedUserFromRequest(request: Request): Promise<User> {
+  const token = getBearerToken(request);
+
+  if (!token) {
+    throw new Error("ログインが必要です");
+  }
+
+  const {
+    data: { user },
+    error,
+  } = await supabaseAdmin.auth.getUser(token);
+
+  if (error || !user) {
+    throw new Error("認証ユーザーの取得に失敗しました");
+  }
+
+  await ensureAuthenticatedUser(user);
+  return user;
+}
+
 async function resolveScopedUserId(userId?: string): Promise<string> {
   return userId ?? (await ensureDemoUser());
 }
@@ -546,6 +589,64 @@ export async function getCreditSummary(userId?: string): Promise<CreditSummary> 
     used: Number(row?.used ?? 0),
     granted: Number(row?.granted ?? 0),
   };
+}
+
+export async function getUserProfile(user: User, userId?: string): Promise<UserProfileSettings> {
+  const scopedUserId = await resolveScopedUserId(userId ?? user.id);
+  const row = await requireProfileRow(scopedUserId);
+
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name ?? getUserDisplayName(user) ?? "Googleユーザー",
+    avatarUrl:
+      typeof user.user_metadata?.avatar_url === "string" && user.user_metadata.avatar_url !== ""
+        ? user.user_metadata.avatar_url
+        : null,
+    planName: "無料",
+    defaultEmotion: row.default_emotion ?? "empathy",
+    writingStyle: row.writing_style ?? "casual",
+    sentenceStyle: row.sentence_style ?? "friendly",
+  };
+}
+
+export async function updateUserProfile(
+  user: User,
+  payload: Pick<UserProfileSettings, "displayName" | "defaultEmotion" | "writingStyle" | "sentenceStyle">,
+  userId?: string,
+): Promise<UserProfileSettings> {
+  const scopedUserId = await resolveScopedUserId(userId ?? user.id);
+  const { error } = await supabaseAdmin
+    .from("profiles")
+    .update({
+      display_name: payload.displayName.trim(),
+      default_emotion: payload.defaultEmotion,
+      writing_style: payload.writingStyle,
+      sentence_style: payload.sentenceStyle,
+    })
+    .eq("id", scopedUserId);
+
+  if (error) {
+    throw error;
+  }
+
+  return getUserProfile(user, scopedUserId);
+}
+
+export async function resetAllGenerations(userId?: string): Promise<{ deletedCount: number }> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const { data, error } = await supabaseAdmin
+    .from("generations")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("user_id", scopedUserId)
+    .is("deleted_at", null)
+    .select("id");
+
+  if (error) {
+    throw error;
+  }
+
+  return { deletedCount: data.length };
 }
 
 export async function migrateLocalData(

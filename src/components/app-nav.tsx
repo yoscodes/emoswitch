@@ -44,7 +44,7 @@ export function AppNav() {
         className="absolute bottom-0 left-0 hidden h-px w-full bg-linear-to-r from-transparent via-(--mode-color,transparent) to-transparent opacity-50 md:block" 
       />
 
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-6 py-2 md:grid md:grid-cols-3 md:items-center md:py-3">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-4 py-2 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6 md:py-3">
         
         {/* ロゴ部分：Zapアイコンを光らせる */}
         <Link
@@ -58,7 +58,8 @@ export function AppNav() {
             エモ・スイッチ
           </span>
         </Link>
-        <div className="md:hidden">
+        <div className="flex items-center gap-2 md:hidden">
+          <CreditStatus compact />
           <AuthActions compact />
         </div>
 
@@ -84,7 +85,7 @@ export function AppNav() {
                   {active && (
                     <motion.div
                       layoutId="nav-pill"
-                      className="absolute inset-0 bg-primary/10 rounded-xl -z-10"
+                      className="absolute inset-0 rounded-xl border bg-primary/15 shadow-sm -z-10"
                       transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                     />
                   )}
@@ -96,7 +97,6 @@ export function AppNav() {
 
         {/* クレジット表示 */}
         <div className="hidden items-center gap-3 md:col-start-3 md:flex md:justify-end">
-          <div className="mr-2 h-4 w-px bg-border" /> {/* 区切り線 */}
           <CreditStatus />
           <AuthActions />
         </div>

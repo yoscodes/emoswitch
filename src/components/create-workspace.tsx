@@ -17,6 +17,7 @@ import {
   ensureDemoWorkspace,
   fetchCreditSummary,
   fetchGhostSettings,
+  fetchUserProfile,
   patchGenerationRecord,
   saveGenerationRecord,
 } from "@/lib/api-client";
@@ -100,7 +101,15 @@ export function CreateWorkspace() {
     }
     if (changed) {
       router.replace("/home", { scroll: false });
+      return;
     }
+
+    void ensureDemoWorkspace()
+      .then(() => fetchUserProfile())
+      .then((profile) => {
+        setEmotion(profile.defaultEmotion);
+      })
+      .catch(() => undefined);
   }, [router]);
 
   useEffect(() => {

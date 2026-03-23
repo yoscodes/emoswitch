@@ -3,7 +3,7 @@
 import { listGenerations } from "@/lib/generation-storage";
 import { loadGhostSettings } from "@/lib/ghost-storage";
 import { supabase } from "@/lib/supabase/client";
-import type { CreditSummary, GenerationRecord, GhostSettings } from "@/lib/types";
+import type { CreditSummary, GenerationRecord, GhostSettings, UserProfileSettings } from "@/lib/types";
 
 const STORAGE_MIGRATION_FLAG = "emoswitch_supabase_migrated_v1";
 export const DATA_SYNC_EVENT = "emoswitch:data-sync";
@@ -145,4 +145,30 @@ export async function fetchCreditSummary(): Promise<CreditSummary> {
   await ensureDemoWorkspace();
   const data = await requestJson<{ summary: CreditSummary }>("/api/credits");
   return data.summary;
+}
+
+export async function fetchUserProfile(): Promise<UserProfileSettings> {
+  const data = await requestJson<{ profile: UserProfileSettings }>("/api/profile");
+  return data.profile;
+}
+
+export async function saveUserProfile(
+  payload: Pick<UserProfileSettings, "displayName" | "defaultEmotion" | "writingStyle" | "sentenceStyle">,
+): Promise<UserProfileSettings> {
+  const data = await requestJson<{ profile: UserProfileSettings }>("/api/profile", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  notifyDataSync();
+  return data.profile;
+}
+
+export async function resetArchive(): Promise<{ deletedCount: number }> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ deletedCount: number }>("/api/generations", {
+    method: "DELETE",
+    body: JSON.stringify({}),
+  });
+  notifyDataSync();
+  return data;
 }

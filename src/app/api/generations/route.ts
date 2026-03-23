@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { createGeneration, listGenerations, resolveRequestActor } from "@/lib/supabase/services";
+import { createGeneration, listGenerations, resetAllGenerations, resolveRequestActor } from "@/lib/supabase/services";
 
 const createGenerationSchema = z.object({
   draft: z.string().min(1),
@@ -41,5 +41,16 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : "履歴の保存に失敗しました";
     const status = message.includes("クレジット") ? 400 : 500;
     return Response.json({ error: message }, { status });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const actor = await resolveRequestActor(request);
+    const result = await resetAllGenerations(actor.userId);
+    return Response.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "履歴の一括削除に失敗しました";
+    return Response.json({ error: message }, { status: 500 });
   }
 }

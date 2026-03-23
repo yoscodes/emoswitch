@@ -29,3 +29,14 @@ export type CreditSummary = {
   used: number;
   granted: number;
 };
+
+export type UserProfileSettings = {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string | null;
+  planName: string;
+  defaultEmotion: EmotionTone;
+  writingStyle: "polite" | "casual" | "passionate";
+  sentenceStyle: "desumasu" | "friendly";
+};
