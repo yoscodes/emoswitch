@@ -238,11 +238,21 @@ function getBearerToken(request: Request): string | null {
 
 async function ensureAuthenticatedUser(user: User): Promise<string> {
   const userId = user.id;
+  const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
+    .from("profiles")
+    .select("display_name")
+    .eq("id", userId)
+    .maybeSingle<{ display_name: string | null }>();
+
+  if (existingProfileError) {
+    throw existingProfileError;
+  }
+
   const { error: profileError } = await supabaseAdmin.from("profiles").upsert(
     {
       id: userId,
       email: user.email ?? `${userId}@users.emoswitch.local`,
-      display_name: getUserDisplayName(user),
+      display_name: existingProfile?.display_name ?? getUserDisplayName(user),
       is_demo: false,
     },
     { onConflict: "id" },
@@ -624,7 +634,8 @@ export async function updateUserProfile(
       writing_style: payload.writingStyle,
       sentence_style: payload.sentenceStyle,
     })
-    .eq("id", scopedUserId);
+    .eq("id", scopedUserId)
+    .select("id");
 
   if (error) {
     throw error;

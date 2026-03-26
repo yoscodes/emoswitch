@@ -163,6 +163,7 @@ export function SettingsPage() {
         sentenceStyle,
       });
       setProfile(nextProfile);
+      setDisplayName(nextProfile.displayName);
       setStatus("プロフィール設定を保存しました。");
     } catch (e) {
       setError(e instanceof Error ? e.message : "プロフィール保存に失敗しました");
@@ -276,7 +277,7 @@ export function SettingsPage() {
                         alt={profile.displayName}
                         width={56}
                         height={56}
-                        className="size-14 rounded-full object-cover"
+                      className="rounded-full object-cover"
                       />
                     ) : (
                       profile.displayName.charAt(0)
