@@ -22,6 +22,7 @@ export type GenerationRecord = {
 export type GhostSettings = {
   profileUrl: string;
   ngWords: string[];
+  stylePrompt: string;
 };
 
 export type CreditSummary = {

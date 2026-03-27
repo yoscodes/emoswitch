@@ -5,6 +5,7 @@ import { getGhostSettings, resolveRequestActor, saveGhostSettings } from "@/lib/
 const ghostSettingsSchema = z.object({
   profileUrl: z.string(),
   ngWords: z.array(z.string()),
+  stylePrompt: z.string().optional().default(""),
 });
 
 export async function GET(request: Request) {

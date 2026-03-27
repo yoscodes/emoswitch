@@ -36,6 +36,7 @@ type LocalMigrationPayload = {
 const DEFAULT_GHOST_SETTINGS: GhostSettings = {
   profileUrl: "",
   ngWords: [],
+  stylePrompt: "",
 };
 
 const DEMO_GENERATIONS: Array<{
@@ -403,6 +404,7 @@ export async function bootstrapDemoWorkspace(): Promise<{ userId: string; seeded
       user_id: userId,
       profile_url: "https://x.com/emo_switch_demo",
       ng_words: ["炎上", "上から目線", "マジで"],
+      style_prompt: "やさしいけれど甘すぎない。語尾はやわらかめで、少し余韻を残す。",
     });
 
     if (ghostSettingsError) {
@@ -550,9 +552,9 @@ export async function getGhostSettings(userId?: string): Promise<GhostSettings> 
   const scopedUserId = await resolveScopedUserId(userId);
   const { data, error } = await supabaseAdmin
     .from("ghost_settings")
-    .select("profile_url, ng_words")
+    .select("profile_url, ng_words, style_prompt")
     .eq("user_id", scopedUserId)
-    .single<{ profile_url: string; ng_words: string[] }>();
+    .single<{ profile_url: string; ng_words: string[]; style_prompt: string | null }>();
 
   if (error) {
     return DEFAULT_GHOST_SETTINGS;
@@ -561,6 +563,7 @@ export async function getGhostSettings(userId?: string): Promise<GhostSettings> 
   return {
     profileUrl: data.profile_url ?? "",
     ngWords: data.ng_words ?? [],
+    stylePrompt: data.style_prompt ?? "",
   };
 }
 
@@ -571,6 +574,7 @@ export async function saveGhostSettings(settings: GhostSettings, userId?: string
       user_id: scopedUserId,
       profile_url: settings.profileUrl,
       ng_words: settings.ngWords,
+      style_prompt: settings.stylePrompt,
     },
     { onConflict: "user_id" },
   );
@@ -731,12 +735,17 @@ export async function migrateLocalData(
 
   if (
     payload.ghostSettings.profileUrl.trim() !== "" ||
-    payload.ghostSettings.ngWords.length > 0
+    payload.ghostSettings.ngWords.length > 0 ||
+    payload.ghostSettings.stylePrompt.trim() !== ""
   ) {
-    await saveGhostSettings({
-      profileUrl: payload.ghostSettings.profileUrl.trim(),
-      ngWords: payload.ghostSettings.ngWords.map((word) => word.trim()).filter(Boolean),
-    }, scopedUserId);
+    await saveGhostSettings(
+      {
+        profileUrl: payload.ghostSettings.profileUrl.trim(),
+        ngWords: payload.ghostSettings.ngWords.map((word) => word.trim()).filter(Boolean),
+        stylePrompt: payload.ghostSettings.stylePrompt.trim(),
+      },
+      scopedUserId,
+    );
   }
 
   return { importedCount: rowsToInsert.length };

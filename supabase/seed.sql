@@ -58,17 +58,20 @@ set
 insert into public.ghost_settings (
   user_id,
   profile_url,
-  ng_words
+  ng_words,
+  style_prompt
 )
 values (
   '11111111-1111-4111-8111-111111111111',
   'https://x.com/emo_switch_demo',
-  array['炎上', '上から目線', 'マジで']
+  array['炎上', '上から目線', 'マジで'],
+  'やさしいけれど甘すぎない。語尾はやわらかめで、少し余韻を残す。'
 )
 on conflict (user_id) do update
 set
   profile_url = excluded.profile_url,
-  ng_words = excluded.ng_words;
+  ng_words = excluded.ng_words,
+  style_prompt = excluded.style_prompt;
 
 insert into public.ghost_sources (
   id,

@@ -5,6 +5,7 @@ const KEY = "emoswitch_ghost_v1";
 const defaultSettings: GhostSettings = {
   profileUrl: "",
   ngWords: [],
+  stylePrompt: "",
 };
 
 export function loadGhostSettings(): GhostSettings {
@@ -18,6 +19,7 @@ export function loadGhostSettings(): GhostSettings {
       ngWords: Array.isArray(parsed.ngWords)
         ? parsed.ngWords.filter((w): w is string => typeof w === "string")
         : [],
+      stylePrompt: typeof parsed.stylePrompt === "string" ? parsed.stylePrompt : "",
     };
   } catch {
     return defaultSettings;

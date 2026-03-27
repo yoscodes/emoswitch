@@ -12,6 +12,7 @@ const bodySchema = z.object({
   speedMode: z.enum(["flash", "pro"]).default("flash"),
   intensity: z.number().min(0).max(100).default(70),
   ngWords: z.array(z.string()).optional().default([]),
+  stylePrompt: z.string().optional().default(""),
 });
 
 const resultSchema = z.object({
@@ -33,7 +34,7 @@ const resultSchema = z.object({
 export async function POST(request: Request) {
   try {
     const json = await request.json();
-    const { draft, emotion, speedMode, intensity, ngWords } = bodySchema.parse(json);
+    const { draft, emotion, speedMode, intensity, ngWords, stylePrompt } = bodySchema.parse(json);
     const modelName =
       speedMode === "pro" ? "gemini-1.5-pro-latest" : "gemini-1.5-flash-latest";
 
@@ -42,6 +43,10 @@ export async function POST(request: Request) {
       ngWords.length > 0
         ? `以下の語句・表現は絶対に使わない: ${ngWords.join("、")}`
         : "NGワード指定なし";
+    const styleLine =
+      stylePrompt.trim() !== ""
+        ? `ユーザーの声のクセ・文体メモ: ${stylePrompt.trim()}`
+        : "文体メモ指定なし";
 
     const system = [
       "あなたはSNS投稿に強い日本語コピーライターです。",
@@ -50,6 +55,7 @@ export async function POST(request: Request) {
       "各variantは1文、28〜90文字、日本語。絵文字は各案最大2つ。",
       "hashtagsは#から始め、日本語・英語混在可。スパムっぽい羅列は避ける。",
       ngLine,
+      styleLine,
       `感情スイッチ: ${EMOTION_LABELS[tone]} / ${EMOTION_PROMPTS[tone]}`,
       `テンション強度（0-100）: ${intensity}。高いほど尖り・熱量、低いほど抑えめ。`,
     ].join("\n");

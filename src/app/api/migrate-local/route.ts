@@ -22,6 +22,7 @@ const payloadSchema = z.object({
   ghostSettings: z.object({
     profileUrl: z.string(),
     ngWords: z.array(z.string()),
+    stylePrompt: z.string().optional().default(""),
   }),
 });
 

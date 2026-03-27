@@ -160,6 +160,7 @@ export function CreateWorkspace() {
           speedMode,
           intensity,
           ngWords: ghost.ngWords,
+          stylePrompt: ghost.stylePrompt,
         }),
       });
       const data = (await response.json()) as TripleResponse & { error?: string };
