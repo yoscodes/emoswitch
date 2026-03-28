@@ -1,5 +1,7 @@
 import type { EmotionTone } from "@/lib/emotions";
 
+export type QuickFeedback = "hot" | "cold" | null;
+
 export type GenerationRecord = {
   id: string;
   createdAt: string;
@@ -17,6 +19,7 @@ export type GenerationRecord = {
   /** 投稿時間・ハッシュタグ変更など、いいね以外の要因メモ */
   memo?: string | null;
   adviceHint?: string | null;
+  quickFeedback?: QuickFeedback;
 };
 
 export type GhostSettings = {

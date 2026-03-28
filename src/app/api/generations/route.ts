@@ -13,6 +13,7 @@ const createGenerationSchema = z.object({
   likes: z.number().int().min(0).nullable(),
   memo: z.string().nullable().optional(),
   adviceHint: z.string().nullable().optional(),
+  quickFeedback: z.enum(["hot", "cold"]).nullable().optional(),
 });
 
 export async function GET(request: Request) {

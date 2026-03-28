@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { CreditCard, LogOut, Settings, ChevronDown, Ghost } from "lucide-react";
+import { CreditCard, LogOut, Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DATA_SYNC_EVENT, fetchCreditSummary, fetchUserProfile } from "@/lib/api-client";
@@ -183,7 +183,7 @@ export function AuthActions({ compact = false, className }: AuthActionsProps) {
         aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
         className={cn(
-          "flex items-center gap-2 rounded-full border bg-background/80 px-2 py-1.5 transition-colors hover:bg-muted/70",
+          "flex items-center rounded-full border bg-background/80 px-1.5 py-1.5 transition-colors hover:bg-muted/70",
           compact && "px-1.5",
         )}
       >
@@ -200,10 +200,6 @@ export function AuthActions({ compact = false, className }: AuthActionsProps) {
             {initial}
           </div>
         )}
-        {!compact ? (
-          <p className="hidden max-w-28 truncate text-sm font-medium md:block">{label}</p>
-        ) : null}
-        <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
 
       <AnimatePresence>
@@ -257,7 +253,7 @@ export function AuthActions({ compact = false, className }: AuthActionsProps) {
                 <Settings className="size-4 text-muted-foreground" />
                 <div>
                   <p>アカウント設定</p>
-                  <p className="text-xs text-muted-foreground">プロフィールや連携の管理</p>
+                  <p className="text-xs text-muted-foreground">プロフィール、連携、NGワードの管理</p>
                 </div>
               </Link>
 
@@ -274,18 +270,6 @@ export function AuthActions({ compact = false, className }: AuthActionsProps) {
                 </div>
               </Link>
 
-              <Link
-                href="/ghost"
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-muted"
-                role="menuitem"
-              >
-                <Ghost className="size-4 text-muted-foreground" />
-                <div>
-                  <p>ゴースト設定</p>
-                  <p className="text-xs text-muted-foreground">文体インポートとNGワード設定</p>
-                </div>
-              </Link>
             </div>
 
             <div className="mx-2 my-1 h-px bg-border" />

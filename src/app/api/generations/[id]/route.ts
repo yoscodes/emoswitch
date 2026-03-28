@@ -6,6 +6,7 @@ const patchSchema = z.object({
   selectedIndex: z.number().int().min(0).max(2).nullable().optional(),
   likes: z.number().int().min(0).nullable().optional(),
   memo: z.string().nullable().optional(),
+  quickFeedback: z.enum(["hot", "cold"]).nullable().optional(),
 });
 
 export async function PATCH(

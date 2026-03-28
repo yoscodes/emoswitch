@@ -37,6 +37,7 @@ export function saveGeneration(entry: Omit<GenerationRecord, "id" | "createdAt">
     likes: entry.likes ?? null,
     memo: entry.memo ?? null,
     adviceHint: entry.adviceHint ?? null,
+    quickFeedback: entry.quickFeedback ?? null,
   };
   const next = [row, ...list.filter((g) => g.id !== id)];
   localStorage.setItem(KEY, JSON.stringify(next));
@@ -45,7 +46,7 @@ export function saveGeneration(entry: Omit<GenerationRecord, "id" | "createdAt">
 
 export function updateGeneration(
   id: string,
-  patch: Partial<Pick<GenerationRecord, "selectedIndex" | "likes" | "memo">>,
+  patch: Partial<Pick<GenerationRecord, "selectedIndex" | "likes" | "memo" | "quickFeedback">>,
 ): void {
   const list = loadRaw();
   const next = list.map((g) => (g.id === id ? { ...g, ...patch } : g));

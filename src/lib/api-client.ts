@@ -103,9 +103,19 @@ export async function saveGenerationRecord(
   return data.row;
 }
 
+export async function seedArchiveSampleData(): Promise<{ insertedCount: number }> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ insertedCount: number }>("/api/generations/seed", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  notifyDataSync();
+  return data;
+}
+
 export async function patchGenerationRecord(
   id: string,
-  payload: Partial<Pick<GenerationRecord, "selectedIndex" | "likes" | "memo">>,
+  payload: Partial<Pick<GenerationRecord, "selectedIndex" | "likes" | "memo" | "quickFeedback">>,
 ): Promise<GenerationRecord> {
   await ensureDemoWorkspace();
   const data = await requestJson<{ row: GenerationRecord }>(`/api/generations/${id}`, {

@@ -20,6 +20,7 @@ import {
   fetchUserProfile,
   patchGenerationRecord,
   saveGenerationRecord,
+  updateGhostSettings,
 } from "@/lib/api-client";
 import { CHAMELEON } from "@/lib/chameleon";
 import type { EmotionTone } from "@/lib/emotions";
@@ -47,6 +48,13 @@ export function CreateWorkspace() {
   const [emotion, setEmotion] = useState<EmotionTone>("empathy");
   const [intensity, setIntensity] = useState(70);
   const [speedMode, setSpeedMode] = useState<"flash" | "pro">("flash");
+  const [stylePrompt, setStylePrompt] = useState("");
+  const [savedStylePrompt, setSavedStylePrompt] = useState("");
+  const [ghostProfileUrl, setGhostProfileUrl] = useState("");
+  const [ghostNgWords, setGhostNgWords] = useState<string[]>([]);
+  const [ghostLoaded, setGhostLoaded] = useState(false);
+  const [styleOpen, setStyleOpen] = useState(false);
+  const [styleSaving, setStyleSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +124,44 @@ export function CreateWorkspace() {
     void ensureDemoWorkspace();
   }, []);
 
+  useEffect(() => {
+    void ensureDemoWorkspace()
+      .then(() => fetchGhostSettings())
+      .then((ghost) => {
+        setGhostProfileUrl(ghost.profileUrl);
+        setGhostNgWords(ghost.ngWords);
+        setStylePrompt(ghost.stylePrompt);
+        setSavedStylePrompt(ghost.stylePrompt);
+        setStyleOpen(ghost.stylePrompt.trim() !== "");
+        setGhostLoaded(true);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const persistStylePrompt = useCallback(async () => {
+    if (!ghostLoaded) return;
+
+    const trimmedStylePrompt = stylePrompt.trim();
+    if (trimmedStylePrompt === savedStylePrompt.trim()) return;
+
+    setStyleSaving(true);
+    try {
+      const savedGhost = await updateGhostSettings({
+        profileUrl: ghostProfileUrl,
+        ngWords: ghostNgWords,
+        stylePrompt: trimmedStylePrompt,
+      });
+      setGhostProfileUrl(savedGhost.profileUrl);
+      setGhostNgWords(savedGhost.ngWords);
+      setStylePrompt(savedGhost.stylePrompt);
+      setSavedStylePrompt(savedGhost.stylePrompt);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "文体指定の保存に失敗しました");
+    } finally {
+      setStyleSaving(false);
+    }
+  }, [ghostLoaded, ghostNgWords, ghostProfileUrl, savedStylePrompt, stylePrompt]);
+
   const handleUploadAudio = async (file: File) => {
     setUploading(true);
     const formData = new FormData();
@@ -160,7 +206,7 @@ export function CreateWorkspace() {
           speedMode,
           intensity,
           ngWords: ghost.ngWords,
-          stylePrompt: ghost.stylePrompt,
+          stylePrompt: stylePrompt.trim(),
         }),
       });
       const data = (await response.json()) as TripleResponse & { error?: string };
@@ -181,6 +227,7 @@ export function CreateWorkspace() {
         likes: null,
         memo: null,
         adviceHint: data.adviceHint ?? null,
+        quickFeedback: null,
       });
       setCurrentId(row.id);
     } catch (e) {
@@ -188,7 +235,7 @@ export function CreateWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [draft, emotion, intensity, speedMode]);
+  }, [draft, emotion, intensity, speedMode, stylePrompt]);
 
   const selectVariant = (index: number) => {
     setSelectedIndex(index);
@@ -255,12 +302,68 @@ export function CreateWorkspace() {
               </label>
             </div>
 
-            <EmotionDial
-              options={toneOptions}
-              value={emotion}
-              onChange={setEmotion}
-              accentRing={chameleon.ring}
-            />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">感情スイッチ</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-expanded={styleOpen}
+                  onClick={() => {
+                    if (styleOpen) {
+                      void persistStylePrompt();
+                    }
+                    setStyleOpen((open) => !open);
+                  }}
+                >
+                  文体
+                </Button>
+              </div>
+              <EmotionDial
+                options={toneOptions}
+                value={emotion}
+                onChange={setEmotion}
+                accentRing={chameleon.ring}
+              />
+              <AnimatePresence initial={false}>
+                {styleOpen ? (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0, y: -6 }}
+                    animate={{ opacity: 1, height: "auto", y: 0 }}
+                    exit={{ opacity: 0, height: 0, y: -6 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="rounded-2xl border bg-background/70 p-4">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium">ひとこと文体指定</p>
+                          <span className="text-xs text-muted-foreground">
+                            {styleSaving
+                              ? "保存中..."
+                              : stylePrompt.trim() === savedStylePrompt.trim()
+                                ? "保存済み"
+                                : "このまま生成に反映"}
+                          </span>
+                        </div>
+                        <Textarea
+                          value={stylePrompt}
+                          onChange={(e) => setStylePrompt(e.target.value)}
+                          onBlur={() => void persistStylePrompt()}
+                          placeholder={
+                            "例: 深夜の独り言風 / やさしいけれど甘すぎない / 語尾は「〜かも」を少し混ぜる"
+                          }
+                          className="min-h-24 text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          感情ダイヤルが「どう感じるか」なら、文体は「誰として話すか」です。
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+            </div>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between text-sm">
@@ -341,7 +444,7 @@ export function CreateWorkspace() {
                             <Check className="size-4 text-green-600" />
                           ) : null}
                         </div>
-                        <p className="min-h-[4.5rem] text-foreground">{text}</p>
+                        <p className="min-h-18 text-foreground">{text}</p>
                         <Button
                           type="button"
                           variant="ghost"

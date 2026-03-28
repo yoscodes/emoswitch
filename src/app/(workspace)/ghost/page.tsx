@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-
-import { GhostSettingsForm } from "@/components/ghost-settings-form";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
-  title: "マイ・ゴースト",
+  title: "設定へ移動",
 };
 
 export default function GhostPage() {
-  return <GhostSettingsForm />;
+  redirect("/settings");
 }

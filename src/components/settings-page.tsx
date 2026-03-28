@@ -3,22 +3,25 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Copy, CreditCard, Download, Ghost, MoonStar, RefreshCcw, ShieldAlert, UserCircle2 } from "lucide-react";
+import { Copy, CreditCard, Download, MoonStar, RefreshCcw, ShieldAlert, UserCircle2 } from "lucide-react";
 
 import {
   fetchCreditSummary,
   fetchGenerations,
+  fetchGhostSettings,
   fetchUserProfile,
   resetArchive,
+  updateGhostSettings,
   saveUserProfile,
 } from "@/lib/api-client";
 import { useAuthSession } from "@/lib/use-auth-session";
-import type { CreditSummary, GenerationRecord, UserProfileSettings } from "@/lib/types";
+import type { CreditSummary, GenerationRecord, GhostSettings, UserProfileSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 
 const EMOTION_OPTIONS = [
   { value: "empathy", label: "共感" },
@@ -97,15 +100,29 @@ function buildCsv(rows: GenerationRecord[]): string {
   return [header.join(","), ...lines].join("\n");
 }
 
+function parseNgWords(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,、]/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 export function SettingsPage() {
   const { user, loading: authLoading } = useAuthSession();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfileSettings | null>(null);
   const [credit, setCredit] = useState<CreditSummary | null>(null);
+  const [ghostSettings, setGhostSettings] = useState<GhostSettings | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [defaultEmotion, setDefaultEmotion] = useState<UserProfileSettings["defaultEmotion"]>("empathy");
   const [writingStyle, setWritingStyle] = useState<UserProfileSettings["writingStyle"]>("casual");
   const [sentenceStyle, setSentenceStyle] = useState<UserProfileSettings["sentenceStyle"]>("friendly");
+  const [profileUrlDraft, setProfileUrlDraft] = useState("");
+  const [ngRawDraft, setNgRawDraft] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
@@ -120,13 +137,20 @@ export function SettingsPage() {
 
     void (async () => {
       try {
-        const [profileData, creditData] = await Promise.all([fetchUserProfile(), fetchCreditSummary()]);
+        const [profileData, creditData, ghostData] = await Promise.all([
+          fetchUserProfile(),
+          fetchCreditSummary(),
+          fetchGhostSettings(),
+        ]);
         setProfile(profileData);
         setCredit(creditData);
+        setGhostSettings(ghostData);
         setDisplayName(profileData.displayName);
         setDefaultEmotion(profileData.defaultEmotion);
         setWritingStyle(profileData.writingStyle);
         setSentenceStyle(profileData.sentenceStyle);
+        setProfileUrlDraft(ghostData.profileUrl);
+        setNgRawDraft(ghostData.ngWords.join("\n"));
       } catch (e) {
         setError(e instanceof Error ? e.message : "設定情報の取得に失敗しました");
       } finally {
@@ -212,13 +236,57 @@ export function SettingsPage() {
     }
   };
 
+  const handleSaveProfileImport = async () => {
+    if (!ghostSettings) return;
+    setError(null);
+    setStatus(null);
+    try {
+      const nextGhost = await updateGhostSettings({
+        profileUrl: profileUrlDraft.trim(),
+        ngWords: ghostSettings.ngWords,
+        stylePrompt: ghostSettings.stylePrompt,
+      });
+      setGhostSettings(nextGhost);
+      setProfileUrlDraft(nextGhost.profileUrl);
+      setStatus("プロフィールURLを保存しました。");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "プロフィールURLの保存に失敗しました");
+    }
+  };
+
+  const handleSaveNgWords = async () => {
+    if (!ghostSettings) return;
+    setError(null);
+    setStatus(null);
+    try {
+      const nextGhost = await updateGhostSettings({
+        profileUrl: ghostSettings.profileUrl,
+        ngWords: parseNgWords(ngRawDraft),
+        stylePrompt: ghostSettings.stylePrompt,
+      });
+      setGhostSettings(nextGhost);
+      setNgRawDraft(nextGhost.ngWords.join("\n"));
+      setStatus("NGワードを保存しました。");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "NGワードの保存に失敗しました");
+    }
+  };
+
+  const hasSavedProfileUrl = (ghostSettings?.profileUrl ?? "").trim() !== "";
+  const urlFeedback =
+    profileUrlDraft.trim() === ""
+      ? null
+      : /^https?:\/\/(www\.)?(x|twitter)\.com\/.+/i.test(profileUrlDraft.trim())
+        ? "XのURLとして認識しています。保存するとプロフィール連携候補として登録されます。"
+        : "URLを確認しました。保存するとプロフィール連携候補として登録されます。";
+
   if (authLoading || loading) {
     return (
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 pb-28 md:px-6">
         <div className="h-8 w-48 animate-pulse rounded bg-muted" />
         <div className="grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
           <div className="h-72 animate-pulse rounded-2xl bg-muted" />
-          <div className="h-[32rem] animate-pulse rounded-2xl bg-muted" />
+          <div className="h-128 animate-pulse rounded-2xl bg-muted" />
         </div>
       </div>
     );
@@ -246,7 +314,7 @@ export function SettingsPage() {
         </div>
         <h1 className="text-2xl font-bold tracking-tight md:text-3xl">自分の居場所を整える</h1>
         <p className="text-muted-foreground">
-          プロフィール、執筆スタイル、クレジット、データ管理を一つの場所にまとめています。
+          プロフィール、執筆スタイル、インポート設定、データ管理を一つの場所にまとめています。
         </p>
         {status ? <p className="text-sm text-emerald-600">{status}</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -255,7 +323,6 @@ export function SettingsPage() {
       <Tabs defaultValue="profile" orientation="vertical" className="gap-6 md:grid md:grid-cols-[220px_minmax(0,1fr)]">
         <TabsList variant="line" className="w-full items-stretch justify-start rounded-2xl border bg-card p-2">
           <TabsTrigger value="profile">プロフィール</TabsTrigger>
-          <TabsTrigger value="ghost">ゴースト設定</TabsTrigger>
           <TabsTrigger value="credit">プラン・使用量</TabsTrigger>
           <TabsTrigger value="data">データ管理</TabsTrigger>
           <TabsTrigger value="app">アプリ情報</TabsTrigger>
@@ -319,86 +386,113 @@ export function SettingsPage() {
                     </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
 
-          <TabsContent value="ghost">
-            <Card>
-              <CardHeader>
-                <CardTitle>ゴースト設定</CardTitle>
-                <CardDescription>執筆スタイルの初期値を決めて、生成の一貫性を高めます。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium" htmlFor="default-emotion">
-                      デフォルト感情
-                    </label>
-                    <select
-                      id="default-emotion"
-                      value={defaultEmotion}
-                      onChange={(e) => setDefaultEmotion(e.target.value as UserProfileSettings["defaultEmotion"])}
-                      className="h-9 w-full rounded-lg border bg-transparent px-3 text-sm"
-                    >
-                      {EMOTION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                <div className="space-y-5 rounded-2xl border bg-muted/20 p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">執筆スタイル</p>
+                    <p className="text-sm text-muted-foreground">
+                      生成の初期値になる感情や語尾を整えて、毎回のブレを減らします。
+                    </p>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium" htmlFor="writing-style">
-                      文体パラメータ
-                    </label>
-                    <select
-                      id="writing-style"
-                      value={writingStyle}
-                      onChange={(e) => setWritingStyle(e.target.value as UserProfileSettings["writingStyle"])}
-                      className="h-9 w-full rounded-lg border bg-transparent px-3 text-sm"
-                    >
-                      {WRITING_STYLE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium" htmlFor="default-emotion">
+                        デフォルト感情
+                      </label>
+                      <select
+                        id="default-emotion"
+                        value={defaultEmotion}
+                        onChange={(e) => setDefaultEmotion(e.target.value as UserProfileSettings["defaultEmotion"])}
+                        className="h-9 w-full rounded-lg border bg-transparent px-3 text-sm"
+                      >
+                        {EMOTION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium" htmlFor="writing-style">
+                        文体パラメータ
+                      </label>
+                      <select
+                        id="writing-style"
+                        value={writingStyle}
+                        onChange={(e) => setWritingStyle(e.target.value as UserProfileSettings["writingStyle"])}
+                        className="h-9 w-full rounded-lg border bg-transparent px-3 text-sm"
+                      >
+                        {WRITING_STYLE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium" htmlFor="sentence-style">
+                        語尾の癖
+                      </label>
+                      <select
+                        id="sentence-style"
+                        value={sentenceStyle}
+                        onChange={(e) => setSentenceStyle(e.target.value as UserProfileSettings["sentenceStyle"])}
+                        className="h-9 w-full rounded-lg border bg-transparent px-3 text-sm"
+                      >
+                        {SENTENCE_STYLE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium" htmlFor="sentence-style">
-                      語尾の癖
-                    </label>
-                    <select
-                      id="sentence-style"
-                      value={sentenceStyle}
-                      onChange={(e) => setSentenceStyle(e.target.value as UserProfileSettings["sentenceStyle"])}
-                      className="h-9 w-full rounded-lg border bg-transparent px-3 text-sm"
-                    >
-                      {SENTENCE_STYLE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="rounded-2xl border bg-background/70 p-4">
+                    <p className="text-sm font-medium">プレビュー</p>
+                    <p className="mt-2 text-sm text-muted-foreground">{previewText}</p>
                   </div>
+
+                  <Button onClick={() => void handleSaveProfile()}>執筆スタイルを保存</Button>
                 </div>
 
-                <div className="rounded-2xl border bg-muted/30 p-4">
-                  <p className="text-sm font-medium">プレビュー</p>
-                  <p className="mt-2 text-sm text-muted-foreground">{previewText}</p>
-                </div>
+                <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">プロフィール連携</p>
+                    <p className="text-sm text-muted-foreground">
+                      X などのプロフィールURLや投稿URLを登録しておくと、将来の文体インポートに使えるようになります。
+                    </p>
+                  </div>
 
-                <div className="flex flex-wrap gap-3">
-                  <Button onClick={() => void handleSaveProfile()}>設定を保存</Button>
-                  <Link href="/ghost" className="inline-flex">
-                    <Button variant="outline">
-                      <Ghost className="mr-1 size-4" />
-                      詳細なゴースト設定へ
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <label className="text-sm font-medium" htmlFor="profile-import-url">
+                      プロフィール / 投稿 URL
+                    </label>
+                    {hasSavedProfileUrl ? <Badge variant="secondary">解析待ち（登録済み）</Badge> : null}
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <div className="space-y-2">
+                      <Input
+                        id="profile-import-url"
+                        type="url"
+                        value={profileUrlDraft}
+                        onChange={(e) => setProfileUrlDraft(e.target.value)}
+                        placeholder="https://x.com/your_handle"
+                      />
+                      {urlFeedback ? (
+                        <div className="rounded-xl border bg-background/70 px-3 py-2 text-sm text-muted-foreground">
+                          {urlFeedback}
+                        </div>
+                      ) : null}
+                    </div>
+                    <Button variant="outline" onClick={() => void handleSaveProfileImport()}>
+                      URLを保存
                     </Button>
-                  </Link>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -443,6 +537,36 @@ export function SettingsPage() {
                 <CardDescription>履歴を持ち出したり、危険な操作をここから管理します。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">NGワード設定</p>
+                    <p className="text-sm text-muted-foreground">
+                      アプリ全体で避けたい語句をルールとして保存します。生成時の禁止表現として反映されます。
+                    </p>
+                  </div>
+
+                  <Textarea
+                    value={ngRawDraft}
+                    onChange={(e) => setNgRawDraft(e.target.value)}
+                    placeholder={"例:\nマジで\n〜っす\n炎上"}
+                    className="min-h-28 font-mono text-sm"
+                  />
+
+                  {ghostSettings && ghostSettings.ngWords.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {ghostSettings.ngWords.map((word) => (
+                        <Badge key={word} variant="outline" className="rounded-full px-3 py-1">
+                          {word}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <Button variant="outline" onClick={() => void handleSaveNgWords()}>
+                    NGワードを保存
+                  </Button>
+                </div>
+
                 <div className="flex flex-wrap gap-3">
                   <Button variant="outline" onClick={() => void handleExportCsv()}>
                     <Download className="mr-1 size-4" />

@@ -1,7 +1,7 @@
 import type { User } from "@supabase/supabase-js";
 import type { EmotionTone } from "@/lib/emotions";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import type { CreditSummary, GenerationRecord, GhostSettings, UserProfileSettings } from "@/lib/types";
+import type { CreditSummary, GenerationRecord, GhostSettings, QuickFeedback, UserProfileSettings } from "@/lib/types";
 
 export const DEMO_USER_ID = "11111111-1111-4111-8111-111111111111";
 export const DEMO_USER_EMAIL = "demo@emoswitch.local";
@@ -21,12 +21,13 @@ type DbGenerationRow = {
   likes: number | null;
   memo: string | null;
   advice_hint: string | null;
+  quick_feedback: QuickFeedback;
   deleted_at: string | null;
 };
 
 type GenerationCreateInput = Omit<GenerationRecord, "id" | "createdAt">;
 
-type GenerationUpdateInput = Partial<Pick<GenerationRecord, "selectedIndex" | "likes" | "memo">>;
+type GenerationUpdateInput = Partial<Pick<GenerationRecord, "selectedIndex" | "likes" | "memo" | "quickFeedback">>;
 
 type LocalMigrationPayload = {
   generations: GenerationRecord[];
@@ -51,6 +52,7 @@ const DEMO_GENERATIONS: Array<{
   likes: number | null;
   memo: string | null;
   advice_hint: string | null;
+  quick_feedback: QuickFeedback;
   created_at: string;
 }> = [
   {
@@ -69,6 +71,7 @@ const DEMO_GENERATIONS: Array<{
     likes: 128,
     memo: "夜21時投稿。1案目をそのまま採用。",
     advice_hint: "高い共感トーンは夜帯と相性が良い傾向です。",
+    quick_feedback: "hot",
     created_at: isoDaysAgo(5),
   },
   {
@@ -87,6 +90,7 @@ const DEMO_GENERATIONS: Array<{
     likes: 42,
     memo: "ハッシュタグを3個に絞った。",
     advice_hint: "有益トーンは具体的な行動提案と組み合わせると保存率が伸びやすいです。",
+    quick_feedback: "hot",
     created_at: isoDaysAgo(4),
   },
   {
@@ -105,6 +109,7 @@ const DEMO_GENERATIONS: Array<{
     likes: 7,
     memo: "深夜帯。3案目に変更して投稿。",
     advice_hint: "情緒トーンは画像や余白のあるレイアウトと組み合わせると反応差を見やすいです。",
+    quick_feedback: null,
     created_at: isoDaysAgo(3),
   },
   {
@@ -123,6 +128,7 @@ const DEMO_GENERATIONS: Array<{
     likes: 0,
     memo: "強すぎたかも。次は強度を下げて比較したい。",
     advice_hint: "毒舌トーンは刺さる一方で離脱も増えやすいので、主語を狭めると安定します。",
+    quick_feedback: "cold",
     created_at: isoDaysAgo(2),
   },
   {
@@ -137,6 +143,7 @@ const DEMO_GENERATIONS: Array<{
     likes: null,
     memo: null,
     advice_hint: "ミニマル案は句読点の有無でも印象が変わります。",
+    quick_feedback: null,
     created_at: isoDaysAgo(1),
   },
 ];
@@ -194,6 +201,7 @@ function mapGeneration(row: DbGenerationRow): GenerationRecord {
     likes: row.likes,
     memo: row.memo,
     adviceHint: row.advice_hint,
+    quickFeedback: row.quick_feedback,
   };
 }
 
@@ -269,7 +277,7 @@ async function requireGenerationById(id: string, userId?: string): Promise<Gener
   const { data, error } = await supabaseAdmin
     .from("generations")
     .select(
-      "id, created_at, draft, emotion, intensity, speed_mode, variants, hashtags, selected_index, likes, memo, advice_hint, deleted_at",
+      "id, created_at, draft, emotion, intensity, speed_mode, variants, hashtags, selected_index, likes, memo, advice_hint, quick_feedback, deleted_at",
     )
     .eq("id", id)
     .eq("user_id", scopedUserId)
@@ -465,7 +473,7 @@ export async function listGenerations(userId?: string): Promise<GenerationRecord
   const { data, error } = await supabaseAdmin
     .from("generations")
     .select(
-      "id, created_at, draft, emotion, intensity, speed_mode, variants, hashtags, selected_index, likes, memo, advice_hint, deleted_at",
+      "id, created_at, draft, emotion, intensity, speed_mode, variants, hashtags, selected_index, likes, memo, advice_hint, quick_feedback, deleted_at",
     )
     .eq("user_id", scopedUserId)
     .is("deleted_at", null)
@@ -508,6 +516,38 @@ export async function createGeneration(
   return requireGenerationById(String(data), scopedUserId);
 }
 
+export async function seedArchiveSampleGenerations(userId?: string): Promise<{ insertedCount: number }> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const { count, error: countError } = await supabaseAdmin
+    .from("generations")
+    .select("id", { head: true, count: "exact" })
+    .eq("user_id", scopedUserId)
+    .is("deleted_at", null);
+
+  if (countError) {
+    throw countError;
+  }
+
+  if ((count ?? 0) > 0) {
+    return { insertedCount: 0 };
+  }
+
+  const rowsToInsert = DEMO_GENERATIONS.map((row) => ({
+    ...row,
+    id: crypto.randomUUID(),
+    user_id: scopedUserId,
+    updated_at: row.created_at,
+  }));
+
+  const { error: insertError } = await supabaseAdmin.from("generations").insert(rowsToInsert);
+
+  if (insertError) {
+    throw insertError;
+  }
+
+  return { insertedCount: rowsToInsert.length };
+}
+
 export async function updateGeneration(
   id: string,
   patch: GenerationUpdateInput,
@@ -519,6 +559,7 @@ export async function updateGeneration(
   if (patch.selectedIndex !== undefined) updatePayload.selected_index = patch.selectedIndex;
   if (patch.likes !== undefined) updatePayload.likes = patch.likes;
   if (patch.memo !== undefined) updatePayload.memo = patch.memo;
+  if (patch.quickFeedback !== undefined) updatePayload.quick_feedback = patch.quickFeedback;
 
   const { error } = await supabaseAdmin
     .from("generations")
@@ -706,6 +747,7 @@ export async function migrateLocalData(
       likes: row.likes,
       memo: row.memo ?? null,
       advice_hint: row.adviceHint ?? null,
+      quick_feedback: row.quickFeedback ?? null,
       created_at: row.createdAt,
       updated_at: row.createdAt,
     }));
