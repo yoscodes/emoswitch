@@ -27,6 +27,7 @@ export function saveGeneration(entry: Omit<GenerationRecord, "id" | "createdAt">
   const row: GenerationRecord = {
     id,
     createdAt,
+    generationMode: "single",
     draft: entry.draft,
     emotion: entry.emotion,
     intensity: entry.intensity,
@@ -38,6 +39,7 @@ export function saveGeneration(entry: Omit<GenerationRecord, "id" | "createdAt">
     memo: entry.memo ?? null,
     adviceHint: entry.adviceHint ?? null,
     quickFeedback: entry.quickFeedback ?? null,
+    memoryTags: entry.memoryTags ?? [],
   };
   const next = [row, ...list.filter((g) => g.id !== id)];
   localStorage.setItem(KEY, JSON.stringify(next));

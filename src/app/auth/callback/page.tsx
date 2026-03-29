@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { migrateCurrentLocalDataAfterLogin } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase/client";
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -83,5 +83,22 @@ export default function AuthCallbackPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-dvh items-center justify-center px-6">
+          <div className="w-full max-w-md rounded-2xl border bg-background p-6 text-center shadow-sm">
+            <p className="text-sm font-medium">Google ログインを完了しています...</p>
+            <p className="mt-2 text-sm text-muted-foreground">認証後、自動で作成画面に戻ります。</p>
+          </div>
+        </div>
+      }
+    >
+      <AuthCallbackContent />
+    </Suspense>
   );
 }

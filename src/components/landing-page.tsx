@@ -37,17 +37,17 @@ export function LandingPage() {
               </Badge>
             </div>
             <p className="text-sm font-medium text-muted-foreground">
-              「書けない」を「あなたらしく刺さる」に変える、感情変換エンジン。
+              効率化ではなく、自分と発信を一致させるためのAI。
             </p>
             <h1 className="text-4xl font-bold leading-tight tracking-tight md:text-5xl">
-              書き出しに迷う朝も、
+              正解っぽい文章ではなく、
               <br />
-              あなたの分身が先に考える。
+              あなたっぽい投稿へ。
             </h1>
             <p className="text-lg leading-relaxed text-muted-foreground">
-              素材を書いて、感情を選んで、レバーを引くだけ。
-              毎回プロンプトを組み立てなくても、ゴースト設定があなたの文体やNGワードを引き継ぎ、
-              3案とハッシュタグをまとめて整えます。
+              文章力より先に、あなたの温度感を伝える。
+              <br />
+              エモ・スイッチは、感情と文体から発信を自分に近づけるAIです。
             </p>
             <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
               <span className="rounded-full border bg-background/80 px-3 py-1.5">
@@ -76,7 +76,7 @@ export function LandingPage() {
                   href="/ghost"
                   className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-full")}
                 >
-                  マイ・ゴースト
+                  自分らしさを育てる
                 </Link>
                 <span className="rounded-full border bg-background/80 px-3 py-2 text-sm text-muted-foreground">
                   AIを育てる
@@ -91,9 +91,9 @@ export function LandingPage() {
           <section className="relative w-full max-w-md flex-1">
             <div className="overflow-hidden rounded-3xl border bg-background/85 shadow-2xl backdrop-blur">
               <div className="border-b bg-muted/30 px-6 py-4">
-                <p className="text-sm font-medium">ゴースト設定がある時・ない時</p>
+                <p className="text-sm font-medium">正しく書くAIと、あなたを書けるAI</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  同じ素材でも、あなたらしさの出方が変わります。
+                  同じ素材でも、整った文章になるか、その人らしい発信になるかは変わります。
                 </p>
               </div>
               <div className="grid gap-4 p-4 sm:grid-cols-2">
@@ -128,10 +128,12 @@ export function LandingPage() {
         <section className="mx-auto w-full max-w-5xl px-6 py-16 md:py-20">
           <div className="mb-10 max-w-2xl">
             <h2 className="text-3xl font-bold tracking-tight md:text-4xl">
-              3ステップの裏で、ゴーストがあなたの代わりに整える。
+              発信で必要なのは、文章力より温度感かもしれない。
             </h2>
             <p className="mt-4 text-lg text-muted-foreground">
-              操作はシンプルなまま。考え込む部分だけを、あなた専用の設定が裏側で引き受けます。
+              フォロワーが増えないのは、文章が下手だからではなく、あなたの熱量や空気感が伝わっていないからかもしれません。
+              <br />
+              エモ・スイッチは、その伝わらないズレを感情スイッチで整えます。
             </p>
           </div>
 
@@ -179,10 +181,14 @@ export function LandingPage() {
           </div>
           <div className="mb-16 max-w-2xl">
             <h2 className="text-3xl font-bold tracking-tight md:text-4xl">
-              AIに、あなたの「魂」を宿す。
+              AIに任せるのではなく、
+              <br />
+              自分の発信と一致させる。
             </h2>
             <p className="mt-4 text-lg text-muted-foreground">
-              「ゴースト設定」は、AIをあなた専用の執筆パートナーへ調律する場所です。
+              私たちは、自分と発信を一致させる活動を「一致活」と考えています。
+              <br />
+              エモ・スイッチは、ただ便利にするためではなく、あなたらしさを保ったまま発信するための土台です。
             </p>
           </div>
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Archive, Home, Settings, Zap } from "lucide-react";
+import { Archive, Home, Zap } from "lucide-react";
 import { motion } from "framer-motion"; // アニメーション用
 
 import { AuthActions } from "@/components/auth-actions";

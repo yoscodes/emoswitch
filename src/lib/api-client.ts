@@ -3,7 +3,16 @@
 import { listGenerations } from "@/lib/generation-storage";
 import { loadGhostSettings } from "@/lib/ghost-storage";
 import { supabase } from "@/lib/supabase/client";
-import type { CreditSummary, GenerationRecord, GhostSettings, UserProfileSettings } from "@/lib/types";
+import type {
+  ArchiveOverview,
+  CreditSummary,
+  GenerationRecord,
+  GenerationSeriesItemRecord,
+  GenerationSeriesRecord,
+  GhostSettings,
+  UserProfileSettings,
+} from "@/lib/types";
+import type { SeriesSlotKey } from "@/lib/series";
 
 const STORAGE_MIGRATION_FLAG = "emoswitch_supabase_migrated_v1";
 export const DATA_SYNC_EVENT = "emoswitch:data-sync";
@@ -37,6 +46,47 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
 
   return data;
 }
+
+export type GenerateTriplePayload = {
+  draft: string;
+  generationMode: "single" | "series";
+  emotion: "empathy" | "toxic" | "mood" | "useful" | "minimal";
+  speedMode: "flash" | "pro";
+  intensity: number;
+  ngWords?: string[];
+  stylePrompt?: string;
+};
+
+export type GenerateSingleResponse = {
+  variants: string[];
+  hashtags: string[];
+  adviceHint?: string;
+  ghostWhisper?: string;
+  memoryTags?: string[];
+};
+
+export type GenerateSeriesItem = {
+  slotKey: SeriesSlotKey;
+  slotLabel: string;
+  body: string;
+  hashtags: string[];
+};
+
+export type GenerateSeriesResponse = {
+  seriesTitle: string;
+  items: GenerateSeriesItem[];
+  adviceHint?: string;
+  ghostWhisper?: string;
+  memoryTags?: string[];
+};
+
+export type GenerateTripleResponse = GenerateSingleResponse | GenerateSeriesResponse;
+
+export type SaveSinglePayload = Omit<GenerationRecord, "id" | "createdAt">;
+export type SaveSeriesPayload = Omit<GenerationSeriesRecord, "id" | "createdAt" | "items" | "generationMode"> & {
+  generationMode: "series";
+  items: Array<Pick<GenerationSeriesItemRecord, "slotKey" | "slotLabel" | "body" | "hashtags">>;
+};
 
 export function notifyDataSync(): void {
   window.dispatchEvent(new Event(DATA_SYNC_EVENT));
@@ -91,11 +141,24 @@ export async function fetchGenerations(): Promise<GenerationRecord[]> {
   return data.rows;
 }
 
-export async function saveGenerationRecord(
-  payload: Omit<GenerationRecord, "id" | "createdAt">,
-): Promise<GenerationRecord> {
+export async function fetchArchiveOverview(): Promise<ArchiveOverview> {
   await ensureDemoWorkspace();
-  const data = await requestJson<{ row: GenerationRecord }>("/api/generations", {
+  return requestJson<ArchiveOverview>("/api/archive/insights");
+}
+
+export async function generateTriple(payload: GenerateTriplePayload): Promise<GenerateTripleResponse> {
+  await ensureDemoWorkspace();
+  return requestJson<GenerateTripleResponse>("/api/generate-triple", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function saveGenerationRecord(
+  payload: SaveSinglePayload | SaveSeriesPayload,
+): Promise<GenerationRecord | GenerationSeriesRecord> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ row: GenerationRecord | GenerationSeriesRecord }>("/api/generations", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -126,9 +189,31 @@ export async function patchGenerationRecord(
   return data.row;
 }
 
+export async function patchSeriesItemRecord(
+  id: string,
+  payload: Partial<Pick<GenerationSeriesItemRecord, "likes" | "memo" | "quickFeedback">>,
+): Promise<GenerationSeriesItemRecord> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ row: GenerationSeriesItemRecord }>(`/api/archive/series-items/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  notifyDataSync();
+  return data.row;
+}
+
 export async function removeGenerationRecord(id: string): Promise<void> {
   await ensureDemoWorkspace();
   await requestJson(`/api/generations/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({}),
+  });
+  notifyDataSync();
+}
+
+export async function removeSeriesRecord(id: string): Promise<void> {
+  await ensureDemoWorkspace();
+  await requestJson(`/api/archive/series/${id}`, {
     method: "DELETE",
     body: JSON.stringify({}),
   });

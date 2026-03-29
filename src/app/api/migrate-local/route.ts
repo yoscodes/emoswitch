@@ -5,6 +5,7 @@ import { migrateLocalData, resolveRequestActor } from "@/lib/supabase/services";
 const generationSchema = z.object({
   id: z.string().uuid(),
   createdAt: z.string(),
+  generationMode: z.literal("single").optional().default("single"),
   draft: z.string(),
   emotion: z.enum(["empathy", "toxic", "mood", "useful", "minimal"]),
   intensity: z.number().int().min(0).max(100),
@@ -15,6 +16,8 @@ const generationSchema = z.object({
   likes: z.number().int().min(0).nullable(),
   memo: z.string().nullable().optional(),
   adviceHint: z.string().nullable().optional(),
+  quickFeedback: z.enum(["hot", "cold"]).nullable().optional(),
+  memoryTags: z.array(z.string()).optional().default([]),
 });
 
 const payloadSchema = z.object({

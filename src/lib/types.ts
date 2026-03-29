@@ -1,10 +1,13 @@
 import type { EmotionTone } from "@/lib/emotions";
+import type { SeriesSlotKey } from "@/lib/series";
 
 export type QuickFeedback = "hot" | "cold" | null;
+export type GenerationMode = "single" | "series";
 
 export type GenerationRecord = {
   id: string;
   createdAt: string;
+  generationMode: "single";
   draft: string;
   emotion: EmotionTone;
   intensity: number;
@@ -20,6 +23,63 @@ export type GenerationRecord = {
   memo?: string | null;
   adviceHint?: string | null;
   quickFeedback?: QuickFeedback;
+  memoryTags?: string[];
+};
+
+export type GenerationSeriesItemRecord = {
+  id: string;
+  seriesId: string;
+  createdAt: string;
+  slotKey: SeriesSlotKey;
+  slotLabel: string;
+  body: string;
+  hashtags: string[];
+  quickFeedback?: QuickFeedback;
+  likes: number | null;
+  memo?: string | null;
+  memoryTags?: string[];
+};
+
+export type GenerationSeriesRecord = {
+  id: string;
+  createdAt: string;
+  generationMode: "series";
+  title: string;
+  draft: string;
+  emotion: EmotionTone;
+  intensity: number;
+  speedMode?: "flash" | "pro";
+  adviceHint?: string | null;
+  ghostWhisper?: string | null;
+  quickFeedback?: QuickFeedback;
+  memoryTags?: string[];
+  items: GenerationSeriesItemRecord[];
+};
+
+export type ArchiveEntry = GenerationRecord | GenerationSeriesRecord;
+
+export type ArchiveInsightEmotion = {
+  emotion: EmotionTone;
+  label: string;
+  usageCount: number;
+  hotCount: number;
+  hotRate: number;
+};
+
+export type ArchiveInsights = {
+  totalSingles: number;
+  totalSeries: number;
+  totalHot: number;
+  totalCold: number;
+  emotionBreakdown: ArchiveInsightEmotion[];
+  bestPatternSummary: string;
+  seriesCompletionRate: number;
+  seriesHotRate: number;
+};
+
+export type ArchiveOverview = {
+  entries: ArchiveEntry[];
+  insights: ArchiveInsights;
 };
 
 export type GhostSettings = {
