@@ -93,6 +93,8 @@ export function buildArchiveInsights(
       seriesItems.filter((item) => item.quickFeedback === "cold").length,
     emotionBreakdown,
     bestPatternSummary,
+    recommendedEmotion: bestPattern?.emotion ?? null,
+    recommendedIntensity: bestPattern?.intensity ?? null,
     seriesCompletionRate:
       seriesItems.length === 0 ? 0 : Math.round((ratedSeriesItems / seriesItems.length) * 100),
     seriesHotRate:

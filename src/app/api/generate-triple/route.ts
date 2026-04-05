@@ -12,12 +12,30 @@ export const runtime = "edge";
 const bodySchema = z.object({
   draft: z.string().min(1, "ネタが空です"),
   generationMode: z.enum(["single", "series"]).default("single"),
+  strategyGoal: z.enum(["awareness", "education", "engagement"]).default("awareness"),
   emotion: z.enum(["empathy", "toxic", "mood", "useful", "minimal"]),
   speedMode: z.enum(["flash", "pro"]).default("flash"),
   intensity: z.number().min(0).max(100).default(70),
   ngWords: z.array(z.string()).optional().default([]),
   stylePrompt: z.string().optional().default(""),
+  personaKeywords: z.array(z.string()).optional().default([]),
+  personaSummary: z.string().optional().default(""),
 });
+
+const STRATEGY_LABELS = {
+  awareness: "認知",
+  education: "教育",
+  engagement: "交流",
+} as const;
+
+const STRATEGY_PROMPTS = {
+  awareness:
+    "目的は認知拡大。インパクト、共感フック、意外性を重視し、流し見でも目が止まる一文を目指す。",
+  education:
+    "目的は教育。論理の流れ、再現性、信頼感を重視し、読後に学びや整理感が残る一文を目指す。",
+  engagement:
+    "目的は交流。問いかけ、余白、親近感を重視し、読者が返信や引用で反応したくなる一文を目指す。",
+} as const;
 
 const singleResultSchema = z.object({
   variants: z
@@ -114,7 +132,7 @@ export async function POST(request: Request) {
   try {
     const actor = await resolveRequestActor(request);
     const json = await request.json();
-    const { draft, generationMode, emotion, speedMode, intensity, ngWords, stylePrompt } =
+    const { draft, generationMode, strategyGoal, emotion, speedMode, intensity, ngWords, stylePrompt, personaKeywords, personaSummary } =
       bodySchema.parse(json);
     const modelName = speedMode === "pro" ? "gemini-1.5-pro-latest" : "gemini-1.5-flash-latest";
     const hotMemories = await listHotGenerationMemories(actor.userId);
@@ -145,6 +163,16 @@ export async function POST(request: Request) {
             ),
           ].join("\n")
         : "成功メモなし";
+    const personaLine =
+      personaKeywords.length > 0 || personaSummary.trim() !== ""
+        ? [
+            "以下はユーザーが承認した発信ペルソナです。雰囲気の再現に使ってください。",
+            personaKeywords.length > 0 ? `ペルソナキーワード: ${personaKeywords.join("、")}` : null,
+            personaSummary.trim() !== "" ? `ペルソナ要約: ${personaSummary.trim()}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : "ペルソナ指定なし";
     const generationModeLine =
       generationMode === "series"
         ? [
@@ -157,7 +185,11 @@ export async function POST(request: Request) {
             ),
             "3本は別案ではなく、1週間の運用セットとして役割を分ける。",
           ].join("\n")
-        : "今回は単発モードです。variantsは同じ素材から切り口だけ微妙に変えた3案にする。";
+        : [
+            "今回は単発モードです。",
+            "variantsは同じ素材と同じ目的から生まれた3案にする。",
+            "ただし3案は言い回しだけ変えるのではなく、フック・視点・着地を少しずつ変えて選ぶ意味を作る。",
+          ].join("\n");
 
     const system = [
       "あなたはSNS投稿に強い日本語コピーライターです。",
@@ -171,7 +203,9 @@ export async function POST(request: Request) {
       "成功メモがないとき、または今回の素材と結びつけにくいときはghostWhisperを省略する。",
       ngLine,
       styleLine,
+      personaLine,
       memoryLine,
+      `今回の目的: ${STRATEGY_LABELS[strategyGoal]} / ${STRATEGY_PROMPTS[strategyGoal]}`,
       `感情スイッチ: ${EMOTION_LABELS[tone]} / ${EMOTION_PROMPTS[tone]}`,
       `テンション強度（0-100）: ${intensity}。高いほど尖り・熱量、低いほど抑えめ。`,
     ].join("\n");

@@ -6,6 +6,12 @@ const defaultSettings: GhostSettings = {
   profileUrl: "",
   ngWords: [],
   stylePrompt: "",
+  manualPosts: [],
+  personaKeywords: [],
+  personaSummary: "",
+  personaEvidence: [],
+  personaStatus: "empty",
+  personaLastAnalyzedHotCount: 0,
 };
 
 export function loadGhostSettings(): GhostSettings {
@@ -20,6 +26,24 @@ export function loadGhostSettings(): GhostSettings {
         ? parsed.ngWords.filter((w): w is string => typeof w === "string")
         : [],
       stylePrompt: typeof parsed.stylePrompt === "string" ? parsed.stylePrompt : "",
+      manualPosts: Array.isArray(parsed.manualPosts)
+        ? parsed.manualPosts.filter((post): post is string => typeof post === "string")
+        : [],
+      personaKeywords: Array.isArray(parsed.personaKeywords)
+        ? parsed.personaKeywords.filter((keyword): keyword is string => typeof keyword === "string")
+        : [],
+      personaSummary: typeof parsed.personaSummary === "string" ? parsed.personaSummary : "",
+      personaEvidence: Array.isArray(parsed.personaEvidence)
+        ? parsed.personaEvidence.filter((item): item is string => typeof item === "string")
+        : [],
+      personaStatus:
+        parsed.personaStatus === "draft" || parsed.personaStatus === "approved"
+          ? parsed.personaStatus
+          : "empty",
+      personaLastAnalyzedHotCount:
+        typeof parsed.personaLastAnalyzedHotCount === "number" && Number.isFinite(parsed.personaLastAnalyzedHotCount)
+          ? parsed.personaLastAnalyzedHotCount
+          : 0,
     };
   } catch {
     return defaultSettings;

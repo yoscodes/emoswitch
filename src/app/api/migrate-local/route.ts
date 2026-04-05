@@ -26,6 +26,12 @@ const payloadSchema = z.object({
     profileUrl: z.string(),
     ngWords: z.array(z.string()),
     stylePrompt: z.string().optional().default(""),
+    manualPosts: z.array(z.string()).optional().default([]),
+    personaKeywords: z.array(z.string()).optional().default([]),
+    personaSummary: z.string().optional().default(""),
+    personaEvidence: z.array(z.string()).optional().default([]),
+    personaStatus: z.enum(["empty", "draft", "approved"]).optional().default("empty"),
+    personaLastAnalyzedHotCount: z.number().int().min(0).optional().default(0),
   }),
 });
 

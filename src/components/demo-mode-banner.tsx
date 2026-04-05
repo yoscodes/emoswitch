@@ -16,7 +16,7 @@ export function DemoModeBanner() {
         <div className="space-y-1">
           <p className="text-sm font-medium">現在はデモモードです。</p>
           <p className="text-xs text-muted-foreground">
-            Google ログインすると、自分専用の履歴・ゴースト設定・クレジットで使えます。
+            Google ログインすると、自分専用の履歴・ペルソナ設定・クレジットで使えます。
           </p>
         </div>
         <AuthActions />

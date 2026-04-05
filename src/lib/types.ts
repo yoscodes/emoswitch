@@ -3,6 +3,7 @@ import type { SeriesSlotKey } from "@/lib/series";
 
 export type QuickFeedback = "hot" | "cold" | null;
 export type GenerationMode = "single" | "series";
+export type PersonaStatus = "empty" | "draft" | "approved";
 
 export type GenerationRecord = {
   id: string;
@@ -73,6 +74,8 @@ export type ArchiveInsights = {
   totalCold: number;
   emotionBreakdown: ArchiveInsightEmotion[];
   bestPatternSummary: string;
+  recommendedEmotion: EmotionTone | null;
+  recommendedIntensity: number | null;
   seriesCompletionRate: number;
   seriesHotRate: number;
 };
@@ -86,6 +89,12 @@ export type GhostSettings = {
   profileUrl: string;
   ngWords: string[];
   stylePrompt: string;
+  manualPosts: string[];
+  personaKeywords: string[];
+  personaSummary: string;
+  personaEvidence: string[];
+  personaStatus: PersonaStatus;
+  personaLastAnalyzedHotCount: number;
 };
 
 export type CreditSummary = {

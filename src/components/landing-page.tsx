@@ -33,7 +33,7 @@ export function LandingPage() {
                 プロンプト不要
               </Badge>
               <Badge variant="outline" className="rounded-full px-3">
-                マイ・ゴースト育成
+                マイ・ペルソナ育成
               </Badge>
             </div>
             <p className="text-sm font-medium text-muted-foreground">
@@ -73,7 +73,7 @@ export function LandingPage() {
               </Link>
               <div className="flex flex-wrap items-center gap-2">
                 <Link
-                  href="/ghost"
+                  href="/persona"
                   className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-full")}
                 >
                   自分らしさを育てる
@@ -105,7 +105,7 @@ export function LandingPage() {
                 </div>
                 <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4">
                   <p className="text-xs font-medium text-violet-700 dark:text-violet-300">
-                    あなたのゴースト
+                    あなたのペルソナ
                   </p>
                   <p className="mt-3 text-sm leading-7">
                     お疲れさま。今日はちょっと外を歩きたくなる空気だね。こういう日は、気分まで軽くなる。
@@ -144,7 +144,7 @@ export function LandingPage() {
               <p className="mt-3 text-sm leading-7 text-muted-foreground">
                 伝えたい事実やメモだけを書けば大丈夫。言い回しまで完璧に考える必要はありません。
               </p>
-              <p className="mt-4 text-sm font-medium">ゴーストが話題の芯を拾う</p>
+              <p className="mt-4 text-sm font-medium">ペルソナが話題の芯を拾う</p>
             </div>
 
             <div className="rounded-3xl border bg-card/60 p-6">

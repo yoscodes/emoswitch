@@ -461,9 +461,9 @@ export function SettingsPage() {
 
                 <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
                   <div className="space-y-1">
-                    <p className="text-sm font-medium">プロフィール連携</p>
+                    <p className="text-sm font-medium">ペルソナ連携</p>
                     <p className="text-sm text-muted-foreground">
-                      X などのプロフィールURLや投稿URLを登録しておくと、将来の文体インポートに使えるようになります。
+                      URL登録やキーワード承認はペルソナ専用ページにまとめました。ここでは入口だけ管理できます。
                     </p>
                   </div>
 
@@ -493,6 +493,9 @@ export function SettingsPage() {
                       URLを保存
                     </Button>
                   </div>
+                  <Link href="/persona" className="inline-flex">
+                    <Button>ペルソナページを開く</Button>
+                  </Link>
                 </div>
               </CardContent>
             </Card>

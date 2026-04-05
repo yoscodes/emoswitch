@@ -75,7 +75,7 @@ const PLANS: PlanRow[] = [
     credits: "50回分 / 月",
     model: "高速モデル（Flash）",
     switches: "基本3種のスイッチ",
-    ghost: "マイ・ゴースト 1体",
+    ghost: "マイ・ペルソナ 1体",
     target: "まずは試したい人",
     checkoutMonthly: checkout.basicMonthly,
     checkoutYearly: checkout.basicYearly,
@@ -87,7 +87,7 @@ const PLANS: PlanRow[] = [
     credits: "300回分 / 月",
     model: "高品質モデル（Pro）",
     switches: "全てのスイッチ（5種＋）",
-    ghost: "マイ・ゴースト 3体",
+    ghost: "マイ・ペルソナ 3体",
     target: "本気でバズらせたい人",
     checkoutMonthly: checkout.creatorMonthly,
     checkoutYearly: checkout.creatorYearly,
@@ -100,7 +100,7 @@ const PLANS: PlanRow[] = [
     credits: "無制限",
     model: "高品質モデル（Pro）",
     switches: "全てのスイッチ",
-    ghost: "マイ・ゴースト無制限",
+    ghost: "マイ・ペルソナ無制限",
     target: "運用代行・プロ向け",
     checkoutMonthly: checkout.proMonthly,
     checkoutYearly: checkout.proYearly,
@@ -260,7 +260,7 @@ function PlanCard({ plan, billing }: { plan: PlanRow; billing: Billing }) {
               <strong className="text-foreground">スイッチ:</strong> {plan.switches}
             </FeatureRow>
             <FeatureRow>
-              <strong className="text-foreground">マイ・ゴースト:</strong> {plan.ghost}
+              <strong className="text-foreground">マイ・ペルソナ:</strong> {plan.ghost}
             </FeatureRow>
           </ul>
         </CardContent>

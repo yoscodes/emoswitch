@@ -50,11 +50,14 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
 export type GenerateTriplePayload = {
   draft: string;
   generationMode: "single" | "series";
+  strategyGoal: "awareness" | "education" | "engagement";
   emotion: "empathy" | "toxic" | "mood" | "useful" | "minimal";
   speedMode: "flash" | "pro";
   intensity: number;
   ngWords?: string[];
   stylePrompt?: string;
+  personaKeywords?: string[];
+  personaSummary?: string;
 };
 
 export type GenerateSingleResponse = {
@@ -226,11 +229,21 @@ export async function fetchGhostSettings(): Promise<GhostSettings> {
   return data.settings;
 }
 
-export async function updateGhostSettings(settings: GhostSettings): Promise<GhostSettings> {
+export async function updateGhostSettings(settings: Partial<GhostSettings>): Promise<GhostSettings> {
   await ensureDemoWorkspace();
   const data = await requestJson<{ settings: GhostSettings }>("/api/ghost-settings", {
     method: "PUT",
     body: JSON.stringify(settings),
+  });
+  notifyDataSync();
+  return data.settings;
+}
+
+export async function analyzePersona(): Promise<GhostSettings> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ settings: GhostSettings }>("/api/persona/analyze", {
+    method: "POST",
+    body: JSON.stringify({}),
   });
   notifyDataSync();
   return data.settings;

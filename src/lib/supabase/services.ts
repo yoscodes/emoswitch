@@ -121,6 +121,12 @@ const DEFAULT_GHOST_SETTINGS: GhostSettings = {
   profileUrl: "",
   ngWords: [],
   stylePrompt: "",
+  manualPosts: [],
+  personaKeywords: [],
+  personaSummary: "",
+  personaEvidence: [],
+  personaStatus: "empty",
+  personaLastAnalyzedHotCount: 0,
 };
 
 const DEMO_GENERATIONS: Array<{
@@ -718,6 +724,21 @@ export async function bootstrapDemoWorkspace(): Promise<{ userId: string; seeded
       profile_url: "https://x.com/emo_switch_demo",
       ng_words: ["炎上", "上から目線", "マジで"],
       style_prompt: "やさしいけれど甘すぎない。語尾はやわらかめで、少し余韻を残す。",
+      manual_posts: [
+        "頑張ってるのに結果が出ない日は、才能よりもタイミングを疑いたい。",
+        "ちゃんとしてるのに伝わらないなら、言葉より温度感がズレているのかもしれない。",
+        "今日も一歩だけ進めたなら、それは止まらなかった証拠だと思う。",
+      ],
+      persona_keywords: ["やさしい余韻", "短文中心", "共感の導入", "断定しすぎない", "夜に合う空気感"],
+      persona_summary:
+        "読者の気持ちを受け止める導入から始まり、短い文で静かに余韻を残すペルソナ。強い断定よりも、そっと背中を押す距離感を大切にしている。",
+      persona_evidence: [
+        "共感トーンの成功投稿が複数あり、読者に寄り添う始まり方が安定している",
+        "採用される文章は短文かつ1文完結が多い",
+        "NGワード設定から、強すぎる表現や違和感のある言い回しを避ける傾向がある",
+      ],
+      persona_status: "approved",
+      persona_last_analyzed_hot_count: 3,
     });
 
     if (ghostSettingsError) {
@@ -1225,9 +1246,19 @@ export async function getGhostSettings(userId?: string): Promise<GhostSettings> 
   const scopedUserId = await resolveScopedUserId(userId);
   const { data, error } = await supabaseAdmin
     .from("ghost_settings")
-    .select("profile_url, ng_words, style_prompt")
+    .select("profile_url, ng_words, style_prompt, manual_posts, persona_keywords, persona_summary, persona_evidence, persona_status, persona_last_analyzed_hot_count")
     .eq("user_id", scopedUserId)
-    .single<{ profile_url: string; ng_words: string[]; style_prompt: string | null }>();
+    .single<{
+      profile_url: string;
+      ng_words: string[];
+      style_prompt: string | null;
+      manual_posts: string[] | null;
+      persona_keywords: string[] | null;
+      persona_summary: string | null;
+      persona_evidence: string[] | null;
+      persona_status: "empty" | "draft" | "approved" | null;
+      persona_last_analyzed_hot_count: number | null;
+    }>();
 
   if (error) {
     return DEFAULT_GHOST_SETTINGS;
@@ -1237,6 +1268,12 @@ export async function getGhostSettings(userId?: string): Promise<GhostSettings> 
     profileUrl: data.profile_url ?? "",
     ngWords: data.ng_words ?? [],
     stylePrompt: data.style_prompt ?? "",
+    manualPosts: data.manual_posts ?? [],
+    personaKeywords: data.persona_keywords ?? [],
+    personaSummary: data.persona_summary ?? "",
+    personaEvidence: data.persona_evidence ?? [],
+    personaStatus: data.persona_status ?? "empty",
+    personaLastAnalyzedHotCount: data.persona_last_analyzed_hot_count ?? 0,
   };
 }
 
@@ -1248,6 +1285,12 @@ export async function saveGhostSettings(settings: GhostSettings, userId?: string
       profile_url: settings.profileUrl,
       ng_words: settings.ngWords,
       style_prompt: settings.stylePrompt,
+      manual_posts: settings.manualPosts,
+      persona_keywords: settings.personaKeywords,
+      persona_summary: settings.personaSummary,
+      persona_evidence: settings.personaEvidence,
+      persona_status: settings.personaStatus,
+      persona_last_analyzed_hot_count: settings.personaLastAnalyzedHotCount,
     },
     { onConflict: "user_id" },
   );
@@ -1434,6 +1477,12 @@ export async function migrateLocalData(
         profileUrl: payload.ghostSettings.profileUrl.trim(),
         ngWords: payload.ghostSettings.ngWords.map((word) => word.trim()).filter(Boolean),
         stylePrompt: payload.ghostSettings.stylePrompt.trim(),
+        manualPosts: payload.ghostSettings.manualPosts ?? [],
+        personaKeywords: payload.ghostSettings.personaKeywords ?? [],
+        personaSummary: payload.ghostSettings.personaSummary?.trim() ?? "",
+        personaEvidence: payload.ghostSettings.personaEvidence ?? [],
+        personaStatus: payload.ghostSettings.personaStatus ?? "empty",
+        personaLastAnalyzedHotCount: payload.ghostSettings.personaLastAnalyzedHotCount ?? 0,
       },
       scopedUserId,
     );
