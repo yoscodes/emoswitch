@@ -74,9 +74,9 @@ const PLANS: PlanRow[] = [
     monthly: PLAN_MONTHLY_JPY.basic,
     credits: "50回分 / 月",
     model: "高速モデル（Flash）",
-    switches: "基本3種のスイッチ",
-    ghost: "マイ・ペルソナ 1体",
-    target: "まずは試したい人",
+    switches: "基本テンプレ + 単発検証",
+    ghost: "起業家ペルソナ 1体",
+    target: "まずは事業の種を試したい人",
     checkoutMonthly: checkout.basicMonthly,
     checkoutYearly: checkout.basicYearly,
   },
@@ -86,9 +86,9 @@ const PLANS: PlanRow[] = [
     monthly: PLAN_MONTHLY_JPY.creator,
     credits: "300回分 / 月",
     model: "高品質モデル（Pro）",
-    switches: "全てのスイッチ（5種＋）",
-    ghost: "マイ・ペルソナ 3体",
-    target: "本気でバズらせたい人",
+    switches: "全戦略テンプレ + 30日ロードマップ",
+    ghost: "起業家ペルソナ 3体",
+    target: "市場検証を継続したい人",
     checkoutMonthly: checkout.creatorMonthly,
     checkoutYearly: checkout.creatorYearly,
     featured: true,
@@ -99,9 +99,9 @@ const PLANS: PlanRow[] = [
     monthly: PLAN_MONTHLY_JPY.pro,
     credits: "無制限",
     model: "高品質モデル（Pro）",
-    switches: "全てのスイッチ",
-    ghost: "マイ・ペルソナ無制限",
-    target: "運用代行・プロ向け",
+    switches: "全機能 + 高頻度な仮説検証",
+    ghost: "起業家ペルソナ無制限",
+    target: "複数テーマを同時に磨く人向け",
     checkoutMonthly: checkout.proMonthly,
     checkoutYearly: checkout.proYearly,
   },
@@ -119,20 +119,22 @@ function FeatureRow({ children }: { children: ReactNode }) {
 export function PlansContent() {
   return (
     <div className="relative min-h-dvh overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-violet-200/40 via-background to-background dark:from-violet-950/35" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,var(--tw-gradient-stops))] from-violet-200/40 via-background to-background dark:from-violet-950/35" />
 
       <main className="relative z-10 mx-auto max-w-6xl px-6 pb-28 pt-4 md:pb-24">
         {/* Hero */}
         <section className="mx-auto max-w-3xl space-y-4 pb-6 text-center md:pb-12">
           <Badge variant="secondary" className="text-xs">
             <Sparkles className="mr-1 size-3" />
-            サブスクリプション
+            Persona DNA Plans
           </Badge>
           <h1 className="text-balance text-3xl font-bold tracking-tight md:text-5xl">
-            あなたの言葉を、最強の武器に。
+            Persona DNA を、
+            <br />
+            継続的な市場検証の基盤にする。
           </h1>
           <p className="text-lg text-muted-foreground md:text-xl">
-            毎日使うものだから、あなたにぴったりのスタイルを。
+            発信案の数だけでなく、DNA資産の蓄積量と検証頻度に合わせて選べます。
           </p>
         </section>
 
@@ -160,7 +162,7 @@ export function PlansContent() {
         {/* Top-up */}
         <section className="mx-auto mt-16 max-w-2xl rounded-2xl border border-dashed bg-muted/20 p-8 text-center md:mt-20">
           <h2 className="text-lg font-semibold tracking-tight md:text-xl">
-            今月だけ、もう少し使いたい？
+            今月だけ、もう少し検証したい？
           </h2>
           <p className="mt-2 text-sm text-muted-foreground">
             サブスクのクレジットとは別に、小分けで追加できます。
@@ -169,7 +171,7 @@ export function PlansContent() {
             <div className="rounded-xl border bg-background/80 px-6 py-4 text-left shadow-sm">
               <p className="text-sm font-medium">20クレジット</p>
               <p className="text-2xl font-bold tabular-nums">¥500〜</p>
-              <p className="text-xs text-muted-foreground">必要な分だけトップアップ</p>
+              <p className="text-xs text-muted-foreground">必要な分だけ仮説検証を追加</p>
             </div>
             <CheckoutLink href={checkout.topup20} variant="outline" className="max-w-xs">
               クレジットを追加する
@@ -181,7 +183,7 @@ export function PlansContent() {
         </section>
 
         <section className="mt-12 border-t pt-8 text-center text-sm text-muted-foreground">
-          <p>価格・クレジットは開発中の目安です。リリース前に変更する場合があります。</p>
+          <p>価格・クレジットは開発中の目安です。正式リリース時に調整する場合があります。</p>
           <Link href="/" className="mt-3 inline-block font-medium text-primary underline-offset-4 hover:underline">
             トップへ戻る
           </Link>
@@ -226,7 +228,7 @@ function PlanCard({ plan, billing }: { plan: PlanRow; billing: Billing }) {
     >
       {plan.featured ? (
         <div className="absolute -top-3 left-1/2 z-20 -translate-x-1/2">
-          <Badge className="bg-gradient-to-r from-violet-600 to-fuchsia-600 px-3 text-white shadow-md">
+          <Badge className="bg-linear-to-r from-violet-600 to-fuchsia-600 px-3 text-white shadow-md">
             人気 No.1
           </Badge>
         </div>
@@ -257,15 +259,15 @@ function PlanCard({ plan, billing }: { plan: PlanRow; billing: Billing }) {
               <strong className="text-foreground">AIモデル:</strong> {plan.model}
             </FeatureRow>
             <FeatureRow>
-              <strong className="text-foreground">スイッチ:</strong> {plan.switches}
+              <strong className="text-foreground">検証導線:</strong> {plan.switches}
             </FeatureRow>
             <FeatureRow>
-              <strong className="text-foreground">マイ・ペルソナ:</strong> {plan.ghost}
+              <strong className="text-foreground">ペルソナ資産:</strong> {plan.ghost}
             </FeatureRow>
           </ul>
         </CardContent>
         <CardFooter className="flex flex-col gap-2 pt-0 pb-6">
-          <CheckoutLink href={href}>プランを選択する</CheckoutLink>
+          <CheckoutLink href={href}>このプランで始める</CheckoutLink>
         </CardFooter>
       </Card>
     </motion.div>

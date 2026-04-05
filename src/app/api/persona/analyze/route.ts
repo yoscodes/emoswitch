@@ -39,16 +39,16 @@ export async function POST(request: Request) {
     const sourceLines = uniqueLines(
       [
         settings.profileUrl ? `登録URL: ${settings.profileUrl}` : null,
-        settings.stylePrompt ? `既存の文体メモ: ${settings.stylePrompt}` : null,
+        settings.stylePrompt ? `既存の起業家スタンスメモ: ${settings.stylePrompt}` : null,
         ...settings.manualPosts.map((post, index) => `手動投稿サンプル${index + 1}: ${post}`),
         ...hotMemories.flatMap((memory, index) => [
-          `成功投稿${index + 1}の元素材: ${memory.draft}`,
-          `成功投稿${index + 1}の採用文: ${memory.selectedText}`,
-          memory.memo ? `成功投稿${index + 1}の補足: ${memory.memo}` : null,
+          `反応が良かった発信${index + 1}の元素材: ${memory.draft}`,
+          `反応が良かった発信${index + 1}の採用文: ${memory.selectedText}`,
+          memory.memo ? `反応が良かった発信${index + 1}の補足: ${memory.memo}` : null,
         ]),
         ...recentRows.slice(0, 4).flatMap((row, index) => [
-          `最近の素材${index + 1}: ${row.draft}`,
-          row.selectedIndex != null ? `最近採用した案${index + 1}: ${row.variants[row.selectedIndex] ?? ""}` : null,
+          `最近の種メモ${index + 1}: ${row.draft}`,
+          row.selectedIndex != null ? `最近採用した発信案${index + 1}: ${row.variants[row.selectedIndex] ?? ""}` : null,
         ]),
       ],
       14,
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
 
     if (sourceLines.length === 0) {
       return Response.json(
-        { error: "先にペルソナURLや文体メモ、生成履歴を用意してください。" },
+        { error: "先にプロフィールURL、手動投稿、または発信履歴を用意してください。" },
         { status: 400 },
       );
     }
@@ -65,15 +65,16 @@ export async function POST(request: Request) {
       model: google("gemini-1.5-flash-latest"),
       schema: personaSchema,
       system: [
-        "あなたはSNS発信の文体分析に強い日本語ストラテジストです。",
-        "入力された断片から、その人らしさをユーザーに説明可能な形で整理してください。",
-        "keywords は5個ちょうど。各キーワードは日本語で2〜8文字程度、抽象語だけに逃げず、文体や温度感が見える言葉にする。",
-        "summary は、どんな距離感・語尾・強さ・読後感を持つペルソナかを日本語で要約する。",
+        "あなたは起業家の思想・強み・価値観を整理する日本語ストラテジストです。",
+        "入力された断片から、その人がどんな事業を育てやすいかをユーザーに説明可能な形で整理してください。",
+        "keywords は5個ちょうど。次の5軸を1つずつ表すこと: 問題意識 / 強み / 価値観 / 顧客への向き合い方 / 発信スタンス。",
+        "各キーワードは日本語で2〜10文字程度、抽象語だけに逃げず、本人らしさが伝わる言葉にする。",
+        "summary は、その人がどんな思想で事業の種を選び、どんな市場への向き合い方をしそうかを日本語で要約する。",
         "evidence は、なぜそう判断したかをユーザーが納得できる説明文にする。",
-        "stylePrompt は、生成時にそのまま使えるような一文の文体メモに整える。",
+        "stylePrompt は、生成時にそのまま使える『起業家スタンスメモ』として一文に整える。",
         "外部サイトの中身を読んだ前提では書かない。与えられた材料から推定できることだけを書く。",
       ].join("\n"),
-      prompt: `以下の材料から、このユーザーの発信ペルソナを分析してください。\n\n${sourceLines
+      prompt: `以下の材料から、このユーザーの起業家ペルソナを分析してください。\n\n${sourceLines
         .map((line) => `- ${line}`)
         .join("\n")}`,
       temperature: 0.4,

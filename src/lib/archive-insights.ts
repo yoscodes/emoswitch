@@ -75,8 +75,8 @@ export function buildArchiveInsights(
   const bestPattern = rankedPatterns[0];
   const weakestPattern = rankedPatterns[rankedPatterns.length - 1];
   const bestPatternSummary = bestPattern
-    ? `最近のあなたは「${EMOTION_LABELS[bestPattern.emotion]} × 強度${bestPattern.intensity}%」の時に最も🔥を獲得しています。一方で、${weakestPattern ? `「${EMOTION_LABELS[weakestPattern.emotion]} × 強度${weakestPattern.intensity}%」` : "一部のモード"}は評価が分かれる傾向にあります。`
-    : "まだ十分な分析データがありません。🔥評価が溜まるほど、成功パターンが言語化されます。";
+    ? `最近は「${EMOTION_LABELS[bestPattern.emotion]} × 強度${bestPattern.intensity}%」で事業仮説を見せた時に最も🔥を獲得しています。一方で、${weakestPattern ? `「${EMOTION_LABELS[weakestPattern.emotion]} × 強度${weakestPattern.intensity}%」` : "一部の見せ方"}は反応が割れやすい傾向にあります。`
+    : "まだ十分な分析データがありません。🔥評価が溜まるほど、刺さる切り口が言語化されます。";
 
   const seriesItems = series.flatMap((row) => row.items);
   const hotSeriesItems = seriesItems.filter((item) => item.quickFeedback === "hot").length;

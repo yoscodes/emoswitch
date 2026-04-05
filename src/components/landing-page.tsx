@@ -14,7 +14,12 @@ export function LandingPage() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,var(--tw-gradient-stops))] from-violet-200/50 via-background to-background dark:from-violet-950/40" />
 
       <header className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-6">
-        <span className="text-lg font-bold tracking-tight">エモ・スイッチ</span>
+        <div className="space-y-0.5">
+          <span className="block text-lg font-bold tracking-tight">Persona DNA</span>
+          <span className="block text-[11px] font-medium tracking-wide text-muted-foreground">
+            Emotional DNA x Market Insight
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           <Link href="/home" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
             アプリへ
@@ -30,34 +35,34 @@ export function LandingPage() {
           <div className="max-w-xl space-y-6">
             <div className="flex flex-wrap gap-2">
               <Badge variant="secondary" className="rounded-full px-3">
-                プロンプト不要
+                Emotional DNA x Market Insight
               </Badge>
               <Badge variant="outline" className="rounded-full px-3">
-                マイ・ペルソナ育成
+                仮説検証ラボ
               </Badge>
             </div>
             <p className="text-sm font-medium text-muted-foreground">
-              効率化ではなく、自分と発信を一致させるためのAI。
+              起業家の熱量を、確信に変えるためのワークスペース。
             </p>
             <h1 className="text-4xl font-bold leading-tight tracking-tight md:text-5xl">
-              正解っぽい文章ではなく、
+              あなたのDNAを、
               <br />
-              あなたっぽい投稿へ。
+              勝てる事業に変換する。
             </h1>
             <p className="text-lg leading-relaxed text-muted-foreground">
-              文章力より先に、あなたの温度感を伝える。
+              「何をしたいか」という思想と、「何が求められるか」という市場反応。
               <br />
-              エモ・スイッチは、感情と文体から発信を自分に近づけるAIです。
+              Persona DNA は、その間にあるズレを仮説に変えて磨き上げる、起業家のためのワークスペースです。
             </p>
             <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
               <span className="rounded-full border bg-background/80 px-3 py-1.5">
-                脱・AI臭さ
+                DNAから削り出す
               </span>
               <span className="rounded-full border bg-background/80 px-3 py-1.5">
-                不快感のゼロ化
+                発信で市場適合を見る
               </span>
               <span className="rounded-full border bg-background/80 px-3 py-1.5">
-                一言で伝わる
+                反応ログが資産になる
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -68,7 +73,7 @@ export function LandingPage() {
                   "inline-flex gap-2 rounded-full px-8",
                 )}
               >
-                使ってみる
+                事業の種を置く
                 <ArrowRight className="size-4" />
               </Link>
               <div className="flex flex-wrap items-center gap-2">
@@ -76,10 +81,10 @@ export function LandingPage() {
                   href="/persona"
                   className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-full")}
                 >
-                  自分らしさを育てる
+                  思想を言語化する
                 </Link>
                 <span className="rounded-full border bg-background/80 px-3 py-2 text-sm text-muted-foreground">
-                  AIを育てる
+                  ペルソナ資産
                 </span>
               </div>
             </div>
@@ -91,34 +96,42 @@ export function LandingPage() {
           <section className="relative w-full max-w-md flex-1">
             <div className="overflow-hidden rounded-3xl border bg-background/85 shadow-2xl backdrop-blur">
               <div className="border-b bg-muted/30 px-6 py-4">
-                <p className="text-sm font-medium">正しく書くAIと、あなたを書けるAI</p>
+                <p className="text-sm font-medium">思考を、検証可能な事業仮説へアップグレードする</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  同じ素材でも、整った文章になるか、その人らしい発信になるかは変わります。
+                  同じ原体験でも、愚痴で終わるか、市場に届く事業仮説になるかは変わります。
                 </p>
               </div>
               <div className="grid gap-4 p-4 sm:grid-cols-2">
                 <div className="rounded-2xl border border-dashed bg-muted/25 p-4">
-                  <p className="text-xs font-medium text-muted-foreground">普通のAI</p>
+                  <p className="text-xs font-medium text-muted-foreground">思考が散らばった状態</p>
                   <p className="mt-3 text-sm leading-7 text-foreground/80">
-                    こんにちは。今日は良い天気ですね。散歩に行くのも良いかもしれません。
+                    採用広報ってしんどい。みんな発信しろって言うけど、何を言えば刺さるのか分からない。
                   </p>
                 </div>
                 <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4">
                   <p className="text-xs font-medium text-violet-700 dark:text-violet-300">
-                    あなたのペルソナ
+                    Persona DNA 後
                   </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Badge variant="secondary" className="rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-200">
+                      👻 ペルソナ: 破壊的
+                    </Badge>
+                    <Badge variant="secondary" className="rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-200">
+                      専門性を反映済み
+                    </Badge>
+                  </div>
                   <p className="mt-3 text-sm leading-7">
-                    お疲れさま。今日はちょっと外を歩きたくなる空気だね。こういう日は、気分まで軽くなる。
+                    採用広報に疲れた代表こそ、発信の悩みを抱えています。まずは「何を発信すれば反応が返るのか」を一緒に検証できる場が必要では？
                   </p>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 border-t px-6 py-4 text-xs text-muted-foreground">
-                <span>文体の癖を反映</span>
+                <span>DNAを抽出</span>
                 <span>・</span>
-                <span>NGワードを回避</span>
+                <span>仮説を発信へ変換</span>
                 <span>・</span>
                 <Link href="/home" className="underline underline-offset-2">
-                  触感UIは作成画面で試せます
+                  Seed Workspace を開く
                 </Link>
               </div>
             </div>
@@ -128,41 +141,41 @@ export function LandingPage() {
         <section className="mx-auto w-full max-w-5xl px-6 py-16 md:py-20">
           <div className="mb-10 max-w-2xl">
             <h2 className="text-3xl font-bold tracking-tight md:text-4xl">
-              発信で必要なのは、文章力より温度感かもしれない。
+              起業家の熱量を、確信に変える。
             </h2>
             <p className="mt-4 text-lg text-muted-foreground">
-              フォロワーが増えないのは、文章が下手だからではなく、あなたの熱量や空気感が伝わっていないからかもしれません。
+              「何を書けばいいか分からない」の正体は、言語化不足ではなく、思想と市場反応がまだ繋がっていないことかもしれません。
               <br />
-              エモ・スイッチは、その伝わらないズレを感情スイッチで整えます。
+              Persona DNA は、そのズレを「DNA -&gt; 仮説 -&gt; 市場反応」の流れで整えます。
             </p>
           </div>
 
           <div className="grid gap-6 md:grid-cols-3">
             <div className="rounded-3xl border bg-card/60 p-6">
               <p className="text-sm font-medium text-muted-foreground">STEP 1</p>
-              <h3 className="mt-3 text-xl font-bold">素材を書く</h3>
+              <h3 className="mt-3 text-xl font-bold">DNAから事業を削り出す</h3>
               <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                伝えたい事実やメモだけを書けば大丈夫。言い回しまで完璧に考える必要はありません。
+                原体験、怒り、違和感、譲れない価値観。それらを素材にして、自分にしかできない事業仮説を削り出します。
               </p>
-              <p className="mt-4 text-sm font-medium">ペルソナが話題の芯を拾う</p>
+              <p className="mt-4 text-sm font-medium">補助入力で顧客・痛み・検証案まで接続</p>
             </div>
 
             <div className="rounded-3xl border bg-card/60 p-6">
               <p className="text-sm font-medium text-muted-foreground">STEP 2</p>
-              <h3 className="mt-3 text-xl font-bold">感情を選ぶ</h3>
+              <h3 className="mt-3 text-xl font-bold">市場へぶつける仮説を整える</h3>
               <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                熱量やトーンはダイヤル感覚で調整。あなたらしい距離感に、出力の空気を寄せていきます。
+                共感導入、問題提起、世界観、論点整理、核心ひと言。どの切り口で市場にぶつけるかを、検証者の視点で整えます。
               </p>
-              <p className="mt-4 text-sm font-medium">ひとこと設定が語尾や温度感を補正</p>
+              <p className="mt-4 text-sm font-medium">AI推奨とテンプレで勝ち筋を比較</p>
             </div>
 
             <div className="rounded-3xl border bg-card/60 p-6">
               <p className="text-sm font-medium text-muted-foreground">STEP 3</p>
-              <h3 className="mt-3 text-xl font-bold">レバーを引く</h3>
+              <h3 className="mt-3 text-xl font-bold">30-Day Market Validation Path</h3>
               <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                3案とハッシュタグを同時に生成。迷いを減らしつつ、投稿ごとのニュアンスも外しません。
+                単発なら発信案3本、連載なら30日間の市場検証パス。反応を残すほど、次の仮説はより鋭くなります。
               </p>
-              <p className="mt-4 text-sm font-medium">NGワードを避けて、あなたらしく仕上げる</p>
+              <p className="mt-4 text-sm font-medium">検証のプロセスそのものを設計する</p>
             </div>
           </div>
         </section>
@@ -170,25 +183,25 @@ export function LandingPage() {
         <section className="mx-auto w-full max-w-5xl px-6 py-16 md:py-24">
           <div className="mb-8 flex flex-wrap gap-2">
             <Badge variant="secondary" className="rounded-full px-3">
-              脱・AI臭さ
+              思想に合う
             </Badge>
             <Badge variant="secondary" className="rounded-full px-3">
-              不快感のゼロ化
+              検証しやすい
             </Badge>
             <Badge variant="secondary" className="rounded-full px-3">
-              一言で伝わる
+              続けるほど賢くなる
             </Badge>
           </div>
           <div className="mb-16 max-w-2xl">
             <h2 className="text-3xl font-bold tracking-tight md:text-4xl">
-              AIに任せるのではなく、
+              投稿して終わりではない。
               <br />
-              自分の発信と一致させる。
+              反応そのものが、あなたの知的資産になる。
             </h2>
             <p className="mt-4 text-lg text-muted-foreground">
-              私たちは、自分と発信を一致させる活動を「一致活」と考えています。
+              反応を得るほど、あなたの「ペルソナDNA」は解像度を上げ、次回の事業提案はより鋭くなります。
               <br />
-              エモ・スイッチは、ただ便利にするためではなく、あなたらしさを保ったまま発信するための土台です。
+              これは、あなただけの事業家としての知的資産です。
             </p>
           </div>
 
@@ -197,12 +210,12 @@ export function LandingPage() {
               <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-900/30">
                 <Sparkles className="size-6" />
               </div>
-              <h3 className="text-xl font-bold">文体インポート</h3>
+              <h3 className="text-xl font-bold">Persona DNA</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                XのURLを預けておくだけ。過去の投稿を将来の学習資産として蓄え、独特の言い回しやリズムの継承に備えます。
+                X の URL や過去投稿を預けるだけ。課題意識、価値観、顧客への向き合い方を言語化して、あなたにしかない事業の方向性を抽出します。
               </p>
               <Badge variant="secondary" className="mt-4 opacity-80">
-                将来の学習準備
+                DNA資産
               </Badge>
             </div>
 
@@ -210,12 +223,12 @@ export function LandingPage() {
               <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 dark:bg-rose-900/30">
                 <ShieldCheck className="size-6" />
               </div>
-              <h3 className="text-xl font-bold">NGワード・シールド</h3>
+              <h3 className="text-xl font-bold">Market Insight Loop</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                自分が絶対に使わない言葉を登録。生成結果から避けたい表現を外し、違和感やブランドのズレを減らします。
+                主役は Archive の反応ログ。刺さった切り口と刺さらなかった見せ方を蓄積し、次の仮説へ返します。
               </p>
               <Badge variant="secondary" className="mt-4">
-                即時反映
+                反応ループ
               </Badge>
             </div>
 
@@ -223,12 +236,12 @@ export function LandingPage() {
               <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-900/30">
                 <MessageSquareQuote className="size-6" />
               </div>
-              <h3 className="text-xl font-bold">ひとこと調律</h3>
+              <h3 className="text-xl font-bold">30-Day Market Validation Path</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                「論理的に」「やさしく」など一言を添えるだけで、毎回のプロンプトなしでも全体の文体にそのニュアンスが宿ります。
+                30回投稿する作業ではなく、共感獲得・納得形成・検証募集の3フェーズで市場を学ぶ検証プロセスとして設計します。
               </p>
               <Badge variant="secondary" className="mt-4">
-                即時反映
+                連続検証
               </Badge>
             </div>
           </div>

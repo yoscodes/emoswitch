@@ -1,22 +1,22 @@
 export type EmotionTone = "empathy" | "toxic" | "mood" | "useful" | "minimal";
 
 export const EMOTION_LABELS: Record<EmotionTone, string> = {
-  empathy: "共感",
-  toxic: "毒舌",
-  mood: "情緒",
-  useful: "有益",
-  minimal: "ミニマル",
+  empathy: "共感導入",
+  toxic: "問題提起",
+  mood: "世界観",
+  useful: "論点整理",
+  minimal: "核心ひと言",
 };
 
 export const EMOTION_PROMPTS: Record<EmotionTone, string> = {
   empathy:
-    "読者の不安を受け止める。優しく寄り添いながら前向きな行動に繋がる一文にする。",
+    "相手の痛みや迷いを受け止め、課題を自分ごととして感じてもらう入口をつくる。",
   toxic:
-    "挑発的だが下品にならない。鋭く本質を突き、読者が思わず反応したくなる一文にする。",
+    "既存の常識や市場のズレを鋭く突き、問題意識が強く伝わる表現にする。",
   mood:
-    "言葉の温度や余韻を大切にする。情景や空気感が伝わる、情緒的で刺さる一文にする。",
+    "思想や未来像が伝わるように、世界観や温度感で共鳴を生む表現にする。",
   useful:
-    "読者が明日から使える学びや気づきが得られる。具体性と実利を意識した有益な一文にする。",
+    "論点を整理し、相手が納得できるように因果や学びを明快に伝える。",
   minimal:
-    "無駄を削ったミニマル表現。余韻を残し、強い意味を持つ短文にする。",
+    "余計な装飾を削り、事業の核だけを短く強く残す。",
 };

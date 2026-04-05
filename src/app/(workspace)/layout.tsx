@@ -5,8 +5,8 @@ import { DemoModeBanner } from "@/components/demo-mode-banner";
 
 export const metadata: Metadata = {
   title: {
-    template: "%s | エモ・スイッチ",
-    default: "エモ・スイッチ",
+    template: "%s | Persona DNA",
+    default: "Persona DNA",
   },
 };
 

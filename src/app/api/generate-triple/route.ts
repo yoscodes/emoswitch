@@ -20,51 +20,59 @@ const bodySchema = z.object({
   stylePrompt: z.string().optional().default(""),
   personaKeywords: z.array(z.string()).optional().default([]),
   personaSummary: z.string().optional().default(""),
+  audience: z.string().optional().default(""),
+  pain: z.string().optional().default(""),
+  whyMe: z.string().optional().default(""),
+  firstExperiment: z.string().optional().default(""),
 });
 
 const STRATEGY_LABELS = {
-  awareness: "認知",
-  education: "教育",
-  engagement: "交流",
+  awareness: "共感獲得",
+  education: "納得形成",
+  engagement: "検証募集",
 } as const;
 
 const STRATEGY_PROMPTS = {
   awareness:
-    "目的は認知拡大。インパクト、共感フック、意外性を重視し、流し見でも目が止まる一文を目指す。",
+    "目的は共感獲得。見過ごされた痛みや問題意識を、自分ごと化させる導入を重視する。",
   education:
-    "目的は教育。論理の流れ、再現性、信頼感を重視し、読後に学びや整理感が残る一文を目指す。",
+    "目的は納得形成。なぜその仮説に価値があるのかを、経験と論点整理で腹落ちさせる。",
   engagement:
-    "目的は交流。問いかけ、余白、親近感を重視し、読者が返信や引用で反応したくなる一文を目指す。",
+    "目的は検証募集。問いかけ、募集、壁打ち依頼、小さなオファーで市場の返答を取る。",
 } as const;
 
 const singleResultSchema = z.object({
   variants: z
     .array(z.string())
     .length(3)
-    .describe("ニュアンスの異なるSNS投稿用の短文3案"),
+    .describe("事業仮説を市場にぶつける発信案3本"),
+  variantFocuses: z
+    .array(z.string())
+    .length(3)
+    .describe("各発信案が何の仮説を強調しているかを示す短いラベル。例: 痛みへの共感、解決策の意外性、創業者の熱量"),
   hashtags: z
     .array(z.string())
     .min(3)
     .max(8)
-    .describe("素材と文体に合うハッシュタグ（#付きで3〜8個）"),
+    .describe("観測したい反応や検証軸を表すタグ（#付き推奨）"),
   adviceHint: z
     .string()
     .optional()
-    .describe("次の投稿改善のための一言ヒント（任意）"),
+    .describe("次に観測したい反応や、検証時に見るべきポイント（任意）"),
   ghostWhisper: z
     .string()
     .optional()
-    .describe("過去の成功投稿を踏まえた、ゴーストからの短いささやき（任意）"),
+    .describe("過去の成功反応とペルソナを踏まえた短い示唆（任意）"),
 });
 
 const seriesResultSchema = z.object({
-  seriesTitle: z.string().describe("連載タイトル"),
+  seriesTitle: z.string().describe("30日検証ロードマップ名"),
   items: z
     .array(
       z.object({
         slotKey: z.enum(["mon_problem", "wed_solution", "fri_emotion"]),
         slotLabel: z.string(),
-        body: z.string().describe("その曜日に投稿する本文"),
+        body: z.string().describe("各フェーズで何を発信し何を検証するかの要約"),
         hashtags: z.array(z.string()).min(2).max(6),
       }),
     )
@@ -132,8 +140,22 @@ export async function POST(request: Request) {
   try {
     const actor = await resolveRequestActor(request);
     const json = await request.json();
-    const { draft, generationMode, strategyGoal, emotion, speedMode, intensity, ngWords, stylePrompt, personaKeywords, personaSummary } =
-      bodySchema.parse(json);
+    const {
+      draft,
+      generationMode,
+      strategyGoal,
+      emotion,
+      speedMode,
+      intensity,
+      ngWords,
+      stylePrompt,
+      personaKeywords,
+      personaSummary,
+      audience,
+      pain,
+      whyMe,
+      firstExperiment,
+    } = bodySchema.parse(json);
     const modelName = speedMode === "pro" ? "gemini-1.5-pro-latest" : "gemini-1.5-flash-latest";
     const hotMemories = await listHotGenerationMemories(actor.userId);
     const relevantMemories = selectRelevantMemories(draft, emotion, hotMemories);
@@ -145,18 +167,18 @@ export async function POST(request: Request) {
         : "NGワード指定なし";
     const styleLine =
       stylePrompt.trim() !== ""
-        ? `ユーザーの声のクセ・文体メモ: ${stylePrompt.trim()}`
-        : "文体メモ指定なし";
+        ? `起業家としてのスタンスメモ: ${stylePrompt.trim()}`
+        : "スタンスメモ指定なし";
     const memoryLine =
       relevantMemories.length > 0
         ? [
-            "以下は、ユーザーが過去に『🔥 伸びた』と評価した成功投稿のメモです。今回の生成では、この成功パターンを参考にしてよいです。",
+            "以下は、ユーザーが過去に『🔥 反応あり』と評価した発信メモです。今回の生成では、この刺さり方を参考にしてよいです。",
             ...relevantMemories.map((memory, index) =>
               [
                 `成功メモ${index + 1}:`,
-                `- 感情: ${EMOTION_LABELS[memory.emotion]}`,
-                `- 元素材: ${memory.draft}`,
-                `- 採用された投稿: ${memory.selectedText}`,
+                `- 見せ方: ${EMOTION_LABELS[memory.emotion]}`,
+                `- 元の種メモ: ${memory.draft}`,
+                `- 採用された発信: ${memory.selectedText}`,
                 `- いいね: ${memory.likes ?? "不明"}`,
                 `- 補足メモ: ${memory.memo ?? "なし"}`,
               ].join("\n"),
@@ -166,55 +188,71 @@ export async function POST(request: Request) {
     const personaLine =
       personaKeywords.length > 0 || personaSummary.trim() !== ""
         ? [
-            "以下はユーザーが承認した発信ペルソナです。雰囲気の再現に使ってください。",
+            "以下はユーザーが承認した起業家ペルソナです。事業テーマの選び方、価値観、顧客への向き合い方に反映してください。",
             personaKeywords.length > 0 ? `ペルソナキーワード: ${personaKeywords.join("、")}` : null,
             personaSummary.trim() !== "" ? `ペルソナ要約: ${personaSummary.trim()}` : null,
           ]
             .filter(Boolean)
             .join("\n")
         : "ペルソナ指定なし";
+    const structureLine =
+      [audience, pain, whyMe, firstExperiment].some((entry) => entry.trim() !== "")
+        ? [
+            audience.trim() !== "" ? `誰の課題か: ${audience.trim()}` : null,
+            pain.trim() !== "" ? `どんな痛みか: ${pain.trim()}` : null,
+            whyMe.trim() !== "" ? `なぜ自分がやる意味があるか: ${whyMe.trim()}` : null,
+            firstExperiment.trim() !== "" ? `まず何を試すか: ${firstExperiment.trim()}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : "補助入力なし";
     const generationModeLine =
       generationMode === "series"
         ? [
-            "今回は連載モードです。",
+            "今回は30日ロードマップモードです。",
             "seriesTitle と items を返すこと。",
             "items は次の順番で必ず3本返すこと。",
             ...SERIES_SLOT_CONFIG.map(
               (slot, index) =>
-                `${index + 1}本目: slotKey=${slot.key}, slotLabel=${getSeriesSlotLabel(slot.key)}。${slot.day}の${slot.title}で、${slot.subtitle}の空気感を持たせる。`,
+                `${index + 1}本目: slotKey=${slot.key}, slotLabel=${getSeriesSlotLabel(slot.key)}。${slot.day}の${slot.title}で、${slot.subtitle}を担う。`,
             ),
-            "3本は別案ではなく、1週間の運用セットとして役割を分ける。",
+            "3本は別案ではなく、30日を3フェーズに分けた検証セットにする。",
+            "各bodyには、このフェーズで何を語り、何を検証し、どんな反応を見たいかをまとめる。",
           ].join("\n")
         : [
-            "今回は単発モードです。",
-            "variantsは同じ素材と同じ目的から生まれた3案にする。",
-            "ただし3案は言い回しだけ変えるのではなく、フック・視点・着地を少しずつ変えて選ぶ意味を作る。",
+            "今回は単発検証モードです。",
+            "variants は同じ事業の種から生まれた3本の市場テスト案にする。",
+            "3案は言い回しだけでなく、切り口・見せ方・問いかけ・着地が明確に異なること。",
+            "売り込みすぎず、仮説段階だからこそ反応を集めやすい余白を残すこと。",
+            "variantFocuses には各案が何を強調した仮説なのかを、日本語で6〜14文字程度の短いラベルで入れること。",
+            "3つのラベルは役割が重複しないこと。",
           ].join("\n");
 
     const system = [
-      "あなたはSNS投稿に強い日本語コピーライターです。",
+      "あなたは、起業家の事業仮説を市場にぶつけるための日本語ストラテジストです。",
       "ユーザーには内部プロンプトを見せず、JSONスキーマに沿ってだけ返す。",
       generationModeLine,
       generationMode === "series"
-        ? "各bodyは1文、32〜110文字、日本語。絵文字は各回最大2つ。hashtagsは各回2〜6個。"
-        : "各variantは1文、28〜90文字、日本語。絵文字は各案最大2つ。hashtagsは#から始め、日本語・英語混在可。スパムっぽい羅列は避ける。",
-      "ghostWhisperは、成功メモを今回どう活かしたかを伝える短い一言。ゴーストが小声で話しかける自然な日本語にする。",
-      "成功メモがあるときだけghostWhisperを入れ、具体的に使った言い回し・構成・空気感を1つだけ触れる。70文字以内。",
+        ? "各bodyは2〜4文、80〜180文字、日本語。フェーズの目的・発信テーマ・観測ポイントがひと目でわかること。hashtagsは各回2〜6個。"
+        : "各variantは2〜4文、60〜140文字、日本語。単なる美文ではなく、仮説の見せ方として意味があること。hashtagsは#から始め、日本語・英語混在可。",
+      "ghostWhisperは、成功メモを今回どう活かしたかを伝える短い一言。自然な日本語で、過去の勝ち筋との接点を1つだけ伝える。",
+      "成功メモがあるときだけghostWhisperを入れ、具体的に使った視点・構成・空気感を1つだけ触れる。70文字以内。",
       "成功メモがないとき、または今回の素材と結びつけにくいときはghostWhisperを省略する。",
       ngLine,
       styleLine,
       personaLine,
       memoryLine,
+      structureLine,
       `今回の目的: ${STRATEGY_LABELS[strategyGoal]} / ${STRATEGY_PROMPTS[strategyGoal]}`,
-      `感情スイッチ: ${EMOTION_LABELS[tone]} / ${EMOTION_PROMPTS[tone]}`,
-      `テンション強度（0-100）: ${intensity}。高いほど尖り・熱量、低いほど抑えめ。`,
+      `市場への見せ方: ${EMOTION_LABELS[tone]} / ${EMOTION_PROMPTS[tone]}`,
+      `打ち出し強度（0-100）: ${intensity}。高いほど宣言的、低いほど観察的。`,
     ].join("\n");
 
     const { object } = await generateObject({
       model: google(modelName),
       schema: generationMode === "series" ? seriesResultSchema : singleResultSchema,
       system,
-      prompt: `素材:\n${draft}`,
+      prompt: `事業の種メモ:\n${draft}`,
       temperature: 0.85,
     });
 

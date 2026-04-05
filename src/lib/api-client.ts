@@ -58,10 +58,15 @@ export type GenerateTriplePayload = {
   stylePrompt?: string;
   personaKeywords?: string[];
   personaSummary?: string;
+  audience?: string;
+  pain?: string;
+  whyMe?: string;
+  firstExperiment?: string;
 };
 
 export type GenerateSingleResponse = {
   variants: string[];
+  variantFocuses: string[];
   hashtags: string[];
   adviceHint?: string;
   ghostWhisper?: string;

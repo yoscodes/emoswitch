@@ -10,8 +10,8 @@ import { CreditStatus } from "@/components/credit-status";
 import { cn } from "@/lib/utils";
 
 const links = [
-  { href: "/home", label: "作成", icon: Home },
-  { href: "/archive", label: "記録", icon: Archive },
+  { href: "/home", label: "種", icon: Home },
+  { href: "/archive", label: "反応", icon: Archive },
   { href: "/persona", label: "ペルソナ", icon: Fingerprint },
 ] as const;
 
@@ -55,7 +55,7 @@ export function AppNav() {
             <Zap className="size-4 text-(--mode-color,white) fill-(--mode-color,transparent)" />
           </div>
           <span className="bg-linear-to-r from-foreground to-foreground/60 bg-clip-text text-transparent">
-            エモ・スイッチ
+            Persona DNA
           </span>
         </Link>
         <div className="flex items-center gap-2 md:hidden">

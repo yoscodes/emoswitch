@@ -62,8 +62,8 @@ const QUICK_FEEDBACK_OPTIONS: Array<{
   },
   {
     value: "hot",
-    shortLabel: "🔥 成功",
-    buttonLabel: "伸びた！",
+    shortLabel: "🔥 反応あり",
+    buttonLabel: "反応あり",
     buttonClassName: "border-orange-200/80 bg-orange-50/70 text-orange-600 hover:bg-orange-100/80",
     filterClassName: "border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100",
     selectorClassName: "border-orange-100 bg-orange-50/40 text-orange-500 hover:bg-orange-50/80",
@@ -71,8 +71,8 @@ const QUICK_FEEDBACK_OPTIONS: Array<{
   },
   {
     value: "cold",
-    shortLabel: "❄️ イマイチ",
-    buttonLabel: "イマイチ",
+    shortLabel: "❄️ 刺さらず",
+    buttonLabel: "刺さらず",
     buttonClassName: "border-slate-200 bg-slate-50/80 text-slate-600 hover:bg-slate-100",
     filterClassName: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
     selectorClassName: "border-slate-200 bg-slate-50/60 text-slate-500 hover:bg-slate-100",
@@ -201,10 +201,10 @@ function InsightsDashboard({
         <CardHeader className={cn("space-y-2 pb-2", compact && "space-y-1.5 px-4 pt-4 pb-1")}>
           <div className="flex items-center gap-2">
             <BarChart3 className="size-4 text-amber-600 dark:text-amber-300" />
-            <h2 className={cn("text-base font-semibold", compact && "text-sm")}>Persona Insight</h2>
+            <h2 className={cn("text-base font-semibold", compact && "text-sm")}>Market Insight</h2>
           </div>
           <p className={cn("text-sm text-muted-foreground", compact && "text-xs leading-5")}>
-            どの感情で書くと届きやすいかを、ペルソナ視点で言語化して返します。
+            どの見せ方で事業仮説が刺さるかを、市場反応ベースで言語化して返します。
           </p>
         </CardHeader>
         <CardContent className={cn("space-y-2 p-5 pt-2", compact && "space-y-1.5 px-4 pb-4 pt-1")}>
@@ -218,7 +218,7 @@ function InsightsDashboard({
               className="mt-1 w-full rounded-full"
               onClick={onApplyInsight}
             >
-              この設定で作成する
+              この仮説で次を作る
             </Button>
           ) : null}
         </CardContent>
@@ -228,10 +228,10 @@ function InsightsDashboard({
         <CardHeader className={cn("space-y-2 pb-2", compact && "space-y-1.5 px-4 pt-4 pb-1")}>
           <div className="flex items-center gap-2">
             <BarChart3 className="size-4 text-primary" />
-            <h2 className={cn("text-base font-semibold", compact && "text-sm")}>感情分布グラフ</h2>
+            <h2 className={cn("text-base font-semibold", compact && "text-sm")}>見せ方分布</h2>
           </div>
           <p className={cn("text-sm text-muted-foreground", compact && "text-xs leading-5")}>
-            どの感情を多用しているかと、どの感情が成功しやすかったかを並べて見ます。
+            どの見せ方を多く試したかと、どの見せ方が反応されやすかったかを並べて見ます。
           </p>
         </CardHeader>
         <CardContent className={cn("space-y-4", compact && "space-y-3 px-4 pb-4")}>
@@ -259,7 +259,7 @@ function InsightsDashboard({
 
       <div className="px-1">
         <p className={cn("text-xs text-muted-foreground", compact && "text-[11px]")}>
-          これまで {totalSwitches}回の魂をスイッチしました。
+          これまで {totalSwitches}回の仮説検証を記録しました。
         </p>
       </div>
     </section>
@@ -283,7 +283,7 @@ export function ArchivePanel() {
     try {
       setOverview(await fetchArchiveOverview());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "分析データの取得に失敗しました");
+      setError(e instanceof Error ? e.message : "反応データの取得に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -306,12 +306,12 @@ export function ArchivePanel() {
       const result = await seedArchiveSampleData();
       setSeedStatus(
         result.insertedCount > 0
-          ? `${result.insertedCount}件のサンプル投稿を追加しました。`
-          : "既に履歴があるため、サンプル投稿の追加はスキップしました。",
+          ? `${result.insertedCount}件のサンプル反応ログを追加しました。`
+          : "既に履歴があるため、サンプル反応ログの追加はスキップしました。",
       );
       await refresh();
     } catch (e) {
-      setSeedError(e instanceof Error ? e.message : "サンプル投稿の追加に失敗しました");
+      setSeedError(e instanceof Error ? e.message : "サンプル反応ログの追加に失敗しました");
     } finally {
       setSeeding(false);
     }
@@ -347,7 +347,7 @@ export function ArchivePanel() {
               variant={modeFilter === mode ? "default" : "ghost"}
               onClick={() => setModeFilter(mode)}
             >
-              {mode === "all" ? "すべて" : mode === "single" ? "単発" : "連載"}
+              {mode === "all" ? "すべて" : mode === "single" ? "単発検証" : "30日ロードマップ"}
             </Button>
           ))}
         </div>
@@ -396,14 +396,14 @@ export function ArchivePanel() {
             <header className="space-y-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="space-y-2">
-                  <h1 className="text-2xl font-bold tracking-tight md:text-3xl">分析センター</h1>
+                  <h1 className="text-2xl font-bold tracking-tight md:text-3xl">市場反応ログ</h1>
                   <p className="text-muted-foreground">
-                    今のあなたの発信状態を見える化し、単発と連載の成功パターンを次の生成へつなげます。
+                    今のあなたの事業仮説がどう受け止められたかを見える化し、次の検証へつなげます。
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 md:justify-end">
                   <Button type="button" variant="outline" onClick={() => void handleSeedSamples()} disabled={seeding}>
-                    {seeding ? "サンプル投稿を追加中..." : "サンプル投稿を入れる"}
+                    {seeding ? "サンプル反応ログを追加中..." : "サンプルログを入れる"}
                   </Button>
                   <Button
                     type="button"
@@ -413,12 +413,12 @@ export function ArchivePanel() {
                     className="gap-2 md:hidden"
                   >
                     <BarChart3 className="size-4" />
-                    {insightsOpen ? "分析を隠す" : "分析を表示"}
+                    {insightsOpen ? "インサイトを隠す" : "インサイトを表示"}
                     <ChevronDown className={cn("size-3.5 transition-transform", insightsOpen && "rotate-180")} />
                   </Button>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">デモや初期検証用に、分析材料を追加できます。</p>
+              <p className="text-xs text-muted-foreground">デモや初期検証用に、市場反応ログのサンプルを追加できます。</p>
               {filterToolbar}
               {seedStatus ? <p className="text-sm text-emerald-600">{seedStatus}</p> : null}
               {seedError ? <p className="text-sm text-destructive">{seedError}</p> : null}
@@ -435,14 +435,14 @@ export function ArchivePanel() {
                 <CardContent className="py-12 text-center text-muted-foreground">
                   {overview.entries.length === 0 ? (
                     <p>
-                      まだ記録がありません。
+                      まだ反応ログがありません。
                       <Link href="/home" className="px-1 font-medium text-primary underline-offset-4 hover:underline">
-                        作成画面
+                        Seed Workspace
                       </Link>
-                      で投稿を生成すると、ここが分析センターとして育ちます。
+                      で仮説を生成すると、ここが市場反応の司令塔として育ちます。
                     </p>
                   ) : (
-                    <p>この条件に一致する投稿はまだありません。</p>
+                    <p>この条件に一致するログはまだありません。</p>
                   )}
                 </CardContent>
               </Card>
@@ -527,7 +527,7 @@ function ArchiveSingleRow({
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <Badge variant="outline" className="rounded-full">
-              単発
+              単発検証
             </Badge>
             <Badge variant="secondary" className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
               {EMOTION_LABELS[row.emotion]}
@@ -556,7 +556,7 @@ function ArchiveSingleRow({
             {adoptedBody ? (
               <>
                 <CheckCircle2 className="size-3" />
-                採用案
+                採用した仮説
               </>
             ) : (
               "未選択"
@@ -564,13 +564,13 @@ function ArchiveSingleRow({
           </Badge>
           <div className="rounded-3xl border-2 border-emerald-300 bg-emerald-50/50 p-6 shadow-sm">
             <p className="text-lg leading-8 text-foreground md:text-xl">
-              {adoptedBody ?? "まだ採用案が選ばれていません。"}
+              {adoptedBody ?? "まだ採用した仮説が選ばれていません。"}
             </p>
           </div>
         </section>
 
         <section className="border-t border-dashed pt-4">
-          <p className="text-xs font-medium text-muted-foreground">素材</p>
+          <p className="text-xs font-medium text-muted-foreground">元の種メモ</p>
           <div className="mt-2 rounded-2xl border border-border/40 bg-muted/20 px-4 py-3">
             <p className="border-l-2 border-muted-foreground/20 pl-3 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
               {row.draft}
@@ -592,7 +592,7 @@ function ArchiveSingleRow({
           <QuickFeedbackPicker value={quickFeedback} saving={feedbackSaving} onChange={saveQuickFeedback} />
           <Button type="button" size="sm" variant="outline" onClick={handleReuseSettings} className="gap-2 text-xs">
             <Wand2 className="size-3.5" />
-            <span className="hidden sm:inline">この案をベースに調整</span>
+            <span className="hidden sm:inline">この仮説で次を検証</span>
             <span className="sm:hidden">調整</span>
           </Button>
           <Button
@@ -640,7 +640,7 @@ function ArchiveSingleRow({
             )}
             {row.hashtags.length > 0 ? (
               <div className="rounded-2xl border bg-background/70 p-4 md:col-span-2">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">ハッシュタグ</p>
+                <p className="mb-2 text-xs font-medium text-muted-foreground">検証タグ</p>
                 <div className="flex flex-wrap gap-2">
                   {row.hashtags.map((tag) => (
                     <Badge key={tag} variant="outline" className="rounded-full bg-background/70 text-[11px]">
@@ -754,7 +754,7 @@ function ArchiveSeriesRow({
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary" className="rounded-full">
-                  連載
+                  30日ロードマップ
                 </Badge>
                 <Badge variant="outline" className="rounded-full">
                   {EMOTION_LABELS[row.emotion]}
@@ -811,13 +811,13 @@ function ArchiveSeriesRow({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Badge variant="default" className="rounded-full">
-                    最新の1件
+                    最新フェーズ
                   </Badge>
                   <Badge variant="outline" className="rounded-full">
                     {latestItem.slotLabel}
                   </Badge>
                 </div>
-                <span className="text-xs text-muted-foreground">スタックの上に表示</span>
+                <span className="text-xs text-muted-foreground">最新の検証フェーズ</span>
               </div>
               <p className="text-sm leading-7 text-foreground">{latestItem.body}</p>
               <div className="flex flex-wrap gap-2">
@@ -847,7 +847,7 @@ function ArchiveSeriesRow({
               className="gap-2 text-xs"
             >
               <Wand2 className="size-3.5" />
-              <span className="hidden sm:inline">この連載をベースに調整</span>
+              <span className="hidden sm:inline">この仮説で次を検証</span>
               <span className="sm:hidden">調整</span>
             </Button>
             <Button
@@ -856,10 +856,10 @@ function ArchiveSeriesRow({
               variant="ghost"
               onClick={() => setOpen((current) => !current)}
               className="gap-2 text-xs"
-              aria-label={open ? "連載を閉じる" : "連載を展開する"}
+              aria-label={open ? "ロードマップを閉じる" : "ロードマップを展開する"}
             >
               <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-              <span className="hidden sm:inline">{open ? "連載を閉じる" : "連載を展開する"}</span>
+              <span className="hidden sm:inline">{open ? "ロードマップを閉じる" : "ロードマップを展開する"}</span>
             </Button>
           </div>
 

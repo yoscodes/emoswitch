@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "エモ・スイッチ",
-  description: "「書けない」を「刺さる」へ。プロンプト不要の感情変換エンジン。",
+  title: "Persona DNA",
+  description: "起業家のDNAから事業仮説を削り出し、市場反応で磨く仮説検証ワークスペース。",
 };
 
 export default function RootLayout({

@@ -24,11 +24,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 const EMOTION_OPTIONS = [
-  { value: "empathy", label: "共感" },
-  { value: "toxic", label: "毒舌" },
-  { value: "mood", label: "情緒" },
-  { value: "useful", label: "有益" },
-  { value: "minimal", label: "ミニマル" },
+  { value: "empathy", label: "共感導入" },
+  { value: "toxic", label: "問題提起" },
+  { value: "mood", label: "世界観" },
+  { value: "useful", label: "論点整理" },
+  { value: "minimal", label: "核心ひと言" },
 ] as const;
 
 const WRITING_STYLE_OPTIONS = [
@@ -43,7 +43,7 @@ const SENTENCE_STYLE_OPTIONS = [
 ] as const;
 
 function buildPreview(profile: UserProfileSettings | null): string {
-  if (!profile) return "設定を保存すると、ここに話し方のサンプルが表示されます。";
+  if (!profile) return "設定を保存すると、ここに起業家としての基本スタンスが表示されます。";
 
   const toneMap = {
     polite: "相手に配慮しながら、整った言葉で伝える",
@@ -56,7 +56,7 @@ function buildPreview(profile: UserProfileSettings | null): string {
     friendly: "今日も一歩ずつ進めていこう。",
   } as const;
 
-  return `${toneMap[profile.writingStyle]}。初期感情は「${EMOTION_OPTIONS.find((item) => item.value === profile.defaultEmotion)?.label ?? "共感"}」で始まり、語尾は「${endingMap[profile.sentenceStyle]}」の雰囲気になります。`;
+  return `${toneMap[profile.writingStyle]}。初期の市場への見せ方は「${EMOTION_OPTIONS.find((item) => item.value === profile.defaultEmotion)?.label ?? "共感導入"}」で始まり、語尾は「${endingMap[profile.sentenceStyle]}」の雰囲気になります。`;
 }
 
 function escapeCsv(value: string | number | null | undefined): string {
@@ -215,14 +215,14 @@ export function SettingsPage() {
       link.download = `emoswitch-archive-${new Date().toISOString().slice(0, 10)}.csv`;
       link.click();
       URL.revokeObjectURL(url);
-      setStatus("アーカイブをCSVで書き出しました。");
+      setStatus("市場反応ログをCSVで書き出しました。");
     } catch (e) {
       setError(e instanceof Error ? e.message : "CSV書き出しに失敗しました");
     }
   };
 
   const handleResetArchive = async () => {
-    if (!window.confirm("アーカイブ履歴をすべて非表示にします。よろしいですか？")) return;
+    if (!window.confirm("市場反応ログをすべて非表示にします。よろしいですか？")) return;
     setResetting(true);
     setError(null);
     setStatus(null);
@@ -248,9 +248,9 @@ export function SettingsPage() {
       });
       setGhostSettings(nextGhost);
       setProfileUrlDraft(nextGhost.profileUrl);
-      setStatus("プロフィールURLを保存しました。");
+      setStatus("ペルソナURLを保存しました。");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "プロフィールURLの保存に失敗しました");
+      setError(e instanceof Error ? e.message : "ペルソナURLの保存に失敗しました");
     }
   };
 
@@ -277,8 +277,8 @@ export function SettingsPage() {
     profileUrlDraft.trim() === ""
       ? null
       : /^https?:\/\/(www\.)?(x|twitter)\.com\/.+/i.test(profileUrlDraft.trim())
-        ? "XのURLとして認識しています。保存するとプロフィール連携候補として登録されます。"
-        : "URLを確認しました。保存するとプロフィール連携候補として登録されます。";
+        ? "XのURLとして認識しています。保存するとペルソナ連携候補として登録されます。"
+        : "URLを確認しました。保存するとペルソナ連携候補として登録されます。";
 
   if (authLoading || loading) {
     return (
@@ -298,7 +298,7 @@ export function SettingsPage() {
         <header className="space-y-2">
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">設定</h1>
           <p className="text-muted-foreground">
-            設定ページは Google ログイン後に利用できます。ログインすると、プロフィールやデータ管理を自分専用で整えられます。
+            設定ページは Google ログイン後に利用できます。ログインすると、プロフィールや検証データ管理を自分専用で整えられます。
           </p>
         </header>
       </div>
@@ -312,9 +312,9 @@ export function SettingsPage() {
           <UserCircle2 className="size-5" />
           <span className="text-sm font-medium">設定</span>
         </div>
-        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">自分の居場所を整える</h1>
+        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">自分の検証環境を整える</h1>
         <p className="text-muted-foreground">
-          プロフィール、執筆スタイル、インポート設定、データ管理を一つの場所にまとめています。
+          プロフィール、起業家スタンス、ペルソナ連携、データ管理を一つの場所にまとめています。
         </p>
         {status ? <p className="text-sm text-emerald-600">{status}</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -333,7 +333,7 @@ export function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>プロフィール</CardTitle>
-                <CardDescription>アプリ内の呼び名と、連絡時に必要な基本情報を整えます。</CardDescription>
+                <CardDescription>アプリ内の呼び名と、基本情報を整えます。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
                 <div className="flex items-center gap-4">
@@ -389,16 +389,16 @@ export function SettingsPage() {
 
                 <div className="space-y-5 rounded-2xl border bg-muted/20 p-4">
                   <div className="space-y-1">
-                    <p className="text-sm font-medium">執筆スタイル</p>
+                    <p className="text-sm font-medium">起業家スタンス</p>
                     <p className="text-sm text-muted-foreground">
-                      生成の初期値になる感情や語尾を整えて、毎回のブレを減らします。
+                      生成の初期値になる見せ方や話し方を整えて、毎回のブレを減らします。
                     </p>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-3">
                     <div className="space-y-2">
                       <label className="text-sm font-medium" htmlFor="default-emotion">
-                        デフォルト感情
+                        デフォルトの見せ方
                       </label>
                       <select
                         id="default-emotion"
@@ -416,7 +416,7 @@ export function SettingsPage() {
 
                     <div className="space-y-2">
                       <label className="text-sm font-medium" htmlFor="writing-style">
-                        文体パラメータ
+                        話し方の傾向
                       </label>
                       <select
                         id="writing-style"
@@ -434,7 +434,7 @@ export function SettingsPage() {
 
                     <div className="space-y-2">
                       <label className="text-sm font-medium" htmlFor="sentence-style">
-                        語尾の癖
+                        語尾の傾向
                       </label>
                       <select
                         id="sentence-style"
@@ -452,11 +452,11 @@ export function SettingsPage() {
                   </div>
 
                   <div className="rounded-2xl border bg-background/70 p-4">
-                    <p className="text-sm font-medium">プレビュー</p>
+                    <p className="text-sm font-medium">スタンスプレビュー</p>
                     <p className="mt-2 text-sm text-muted-foreground">{previewText}</p>
                   </div>
 
-                  <Button onClick={() => void handleSaveProfile()}>執筆スタイルを保存</Button>
+                  <Button onClick={() => void handleSaveProfile()}>起業家スタンスを保存</Button>
                 </div>
 
                 <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
@@ -490,7 +490,7 @@ export function SettingsPage() {
                       ) : null}
                     </div>
                     <Button variant="outline" onClick={() => void handleSaveProfileImport()}>
-                      URLを保存
+                      ペルソナURLを保存
                     </Button>
                   </div>
                   <Link href="/persona" className="inline-flex">
@@ -505,7 +505,7 @@ export function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>プラン・使用量</CardTitle>
-                <CardDescription>現在の契約状態とクレジット消費の目安を確認できます。</CardDescription>
+                <CardDescription>現在の契約状態と仮説検証量の目安を確認できます。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
                 <div className="flex flex-wrap items-center gap-3">
@@ -516,11 +516,11 @@ export function SettingsPage() {
                 <div className="grid gap-4 md:grid-cols-3">
                   <MetricCard label="残りクレジット" value={credit ? `${credit.remaining}回` : "..."} />
                   <MetricCard label="累計付与" value={credit ? `${credit.granted}回` : "..."} />
-                  <MetricCard label="累計使用" value={credit ? `${credit.used}回` : "..."} />
+                  <MetricCard label="累計検証" value={credit ? `${credit.used}回` : "..."} />
                 </div>
 
                 <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  次回の自動付与や決済履歴は今後ここに追加予定です。まずはプランページからクレジットを管理できます。
+                  次回の自動付与や決済履歴は今後ここに追加予定です。まずはプランページから検証量を管理できます。
                 </div>
 
                 <Link href="/plans" className="inline-flex">
@@ -537,14 +537,14 @@ export function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>データ管理</CardTitle>
-                <CardDescription>履歴を持ち出したり、危険な操作をここから管理します。</CardDescription>
+                <CardDescription>市場反応ログを持ち出したり、危険な操作をここから管理します。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
                   <div className="space-y-1">
                     <p className="text-sm font-medium">NGワード設定</p>
                     <p className="text-sm text-muted-foreground">
-                      アプリ全体で避けたい語句をルールとして保存します。生成時の禁止表現として反映されます。
+                      アプリ全体で避けたい語句をルールとして保存します。発信案生成時の禁止表現として反映されます。
                     </p>
                   </div>
 
@@ -573,11 +573,11 @@ export function SettingsPage() {
                 <div className="flex flex-wrap gap-3">
                   <Button variant="outline" onClick={() => void handleExportCsv()}>
                     <Download className="mr-1 size-4" />
-                    アーカイブをCSVで書き出す
+                    市場反応ログをCSVで書き出す
                   </Button>
                   <Button variant="outline" onClick={() => void handleResetArchive()} disabled={resetting}>
                     <RefreshCcw className="mr-1 size-4" />
-                    全履歴を消去
+                    全ログを消去
                   </Button>
                 </div>
 

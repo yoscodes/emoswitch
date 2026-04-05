@@ -92,7 +92,7 @@ export function PersonaPage() {
       setKeywordDrafts(normalizeKeywordDraft(next.personaKeywords));
       setSummaryDraft(next.personaSummary);
       setStylePromptDraft(next.stylePrompt);
-      setStatus("ペルソナ分析を更新しました。内容を確認して承認できます。");
+      setStatus("起業家ペルソナを更新しました。内容を確認して承認できます。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "ペルソナ分析に失敗しました");
     } finally {
@@ -119,7 +119,7 @@ export function PersonaPage() {
       setKeywordDrafts(normalizeKeywordDraft(next.personaKeywords));
       setSummaryDraft(next.personaSummary);
       setStylePromptDraft(next.stylePrompt);
-      setStatus("ペルソナを承認しました。以後の生成に反映されます。");
+      setStatus("起業家ペルソナを承認しました。以後の事業仮説生成に反映されます。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "ペルソナの保存に失敗しました");
     } finally {
@@ -137,7 +137,7 @@ export function PersonaPage() {
         <header className="space-y-2">
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">ペルソナ</h1>
           <p className="text-muted-foreground">
-            ペルソナ学習は Google ログイン後に利用できます。自分の発信資産を育てて、生成の精度を積み上げられます。
+            ペルソナ学習は Google ログイン後に利用できます。思想・強み・価値観を育てて、事業仮説の精度を積み上げられます。
           </p>
         </header>
       </div>
@@ -149,11 +149,11 @@ export function PersonaPage() {
       <header className="space-y-3">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Fingerprint className="size-5" />
-          <span className="text-sm font-medium">Persona Studio</span>
+          <span className="text-sm font-medium">Founder Persona Studio</span>
         </div>
-        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">自分らしさを、見える形で育てる</h1>
+        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">思想・強み・価値観を、事業の種になる形で育てる</h1>
         <p className="max-w-3xl text-muted-foreground">
-          URL、手動で貼った過去投稿、最近の成功投稿、文体メモをもとに、AIがあなたの特徴を5つのキーワードで抽出します。内容を承認・修正してから作成に反映するので、学習の中身が見えます。
+          URL、手動で貼った過去投稿、最近の成功発信、スタンスメモをもとに、AIがあなたの起業家特性を5つのキーワードで抽出します。内容を承認・修正してから生成に反映するので、分析の中身が見えます。
         </p>
         {status ? <p className="text-sm text-emerald-600">{status}</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -168,7 +168,7 @@ export function PersonaPage() {
                 <p className="text-sm font-medium">新しい成功パターンが見つかりました</p>
               </div>
               <p className="text-sm text-muted-foreground">
-                Archive で 🔥 が {archiveOverview?.insights.totalHot ?? 0} 件たまりました。いま再分析すると、承認済みペルソナに最近の勝ち筋を取り込めます。
+                Archive で 🔥 が {archiveOverview?.insights.totalHot ?? 0} 件たまりました。いま再分析すると、承認済みペルソナに最近の市場反応を取り込めます。
               </p>
             </div>
             <Button type="button" onClick={() => void handleAnalyze()} disabled={analyzing}>
@@ -183,7 +183,7 @@ export function PersonaPage() {
         <CardHeader>
           <CardTitle>取り込み元</CardTitle>
           <CardDescription>
-            X のプロフィールURLだけでなく、自分の過去投稿を直接貼って素材にできます。URL取得が難しい場合でも、ここを埋めれば確実にペルソナを作れます。
+            X のプロフィールURLだけでなく、自分の過去投稿や思想メモを直接貼って素材にできます。URL取得が難しい場合でも、ここを埋めれば確実にペルソナを作れます。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -198,7 +198,7 @@ export function PersonaPage() {
           </div>
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium">手動で貼る過去投稿</p>
+              <p className="text-sm font-medium">手動で貼る過去投稿 / 思想メモ</p>
               <span className="text-xs text-muted-foreground">{manualPostCount}/5 入力済み</span>
             </div>
             <div className="grid gap-3">
@@ -212,7 +212,7 @@ export function PersonaPage() {
                     setManualPostDrafts(normalizeManualPosts(next));
                   }}
                   className="min-h-20"
-                  placeholder={`過去投稿 ${index + 1} をそのまま貼り付け`}
+                  placeholder={`材料 ${index + 1} をそのまま貼り付け`}
                 />
               ))}
             </div>
@@ -220,11 +220,11 @@ export function PersonaPage() {
           <div className="flex flex-wrap items-center gap-3">
             <Button type="button" onClick={() => void handleAnalyze()} disabled={analyzing}>
               <Wand2 className="mr-1 size-4" />
-              {analyzing ? "分析中..." : "5キーワードを抽出"}
+              {analyzing ? "分析中..." : "起業家特性を抽出"}
             </Button>
             <Link href="/home">
               <Button type="button" variant="outline">
-                作成画面へ戻る
+                Seed Workspace へ戻る
               </Button>
             </Link>
           </div>
@@ -233,9 +233,9 @@ export function PersonaPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>ペルソナ分析</CardTitle>
+          <CardTitle>起業家ペルソナ分析</CardTitle>
           <CardDescription>
-            抽出結果はそのまま使わず、あなた自身が承認・修正できます。ここで整えた内容が今後の生成精度に効きます。
+            抽出結果はそのまま使わず、あなた自身が承認・修正できます。ここで整えた内容が今後の事業仮説生成精度に効きます。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -256,7 +256,7 @@ export function PersonaPage() {
                   next[index] = event.target.value;
                   setKeywordDrafts(normalizeKeywordDraft(next));
                 }}
-                placeholder={`特徴 ${index + 1}`}
+                placeholder={["問題意識", "強み", "価値観", "顧客観", "発信姿勢"][index]}
               />
             ))}
           </div>
@@ -267,17 +267,17 @@ export function PersonaPage() {
               value={summaryDraft}
               onChange={(event) => setSummaryDraft(event.target.value)}
               className="min-h-28"
-              placeholder="例: 読者に寄り添う導入から始まり、短い文で静かに余韻を残す..."
+              placeholder="例: 当事者として抱えた違和感から課題を定義し、実体験と観察をもとに小さく検証を回すタイプ..."
             />
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm font-medium">生成に使う文体メモ</p>
+            <p className="text-sm font-medium">生成に使う起業家スタンスメモ</p>
             <Textarea
               value={stylePromptDraft}
               onChange={(event) => setStylePromptDraft(event.target.value)}
               className="min-h-24"
-              placeholder="例: やさしいけれど甘すぎない。断定よりも余韻を残し、短文で締める。"
+              placeholder="例: 原体験から課題を語り、断定しすぎず検証を呼び込む。顧客を見下さず、同じ目線で話す。"
             />
           </div>
 
@@ -296,7 +296,7 @@ export function PersonaPage() {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                まだ分析結果がありません。URLか手動投稿を用意して、5キーワード抽出を実行してください。
+                まだ分析結果がありません。URLか手動投稿を用意して、起業家特性の抽出を実行してください。
               </p>
             )}
           </div>
