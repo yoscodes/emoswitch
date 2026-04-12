@@ -51,7 +51,7 @@ export function AppNav() {
           href="/"
           className="group flex items-center gap-2 shrink-0 text-sm font-bold tracking-tighter md:col-start-1 md:text-lg"
         >
-          <div className="p-1 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+          <div className="rounded-lg bg-primary/10 p-1 transition-colors group-hover:bg-primary/20">
             <Zap className="size-4 text-(--mode-color,white) fill-(--mode-color,transparent)" />
           </div>
           <span className="bg-linear-to-r from-foreground to-foreground/60 bg-clip-text text-transparent">

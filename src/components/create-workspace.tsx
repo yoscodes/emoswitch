@@ -4,12 +4,11 @@ import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, Check, Fingerprint, Flame, Heart, Swords } from "lucide-react";
+import { BookOpen, Check, Flame, Heart, Swords } from "lucide-react";
 
 import { GenerationSkeleton } from "@/components/generation-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ensureDemoWorkspace,
@@ -219,7 +218,6 @@ export function CreateWorkspace() {
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [archiveRecommendation, setArchiveRecommendation] = useState<ArchiveRecommendation | null>(null);
-  const [personaBadgeOpen, setPersonaBadgeOpen] = useState(false);
   const [personaKeywords, setPersonaKeywords] = useState<string[]>([]);
   const [personaSummary, setPersonaSummary] = useState("");
   const [personaStatus, setPersonaStatus] = useState<"empty" | "draft" | "approved">("empty");
@@ -328,11 +326,10 @@ export function CreateWorkspace() {
   }, [activeTemplate?.label, activeTemplate?.strategyGoal, canvasPreviewTitle, strategyGoal, trimmedDraft]);
   const selectedPreview = previewCandidates[selectedPreviewIndex] ?? previewCandidates[0];
   const seriesRoadmap = buildSeriesRoadmap(activeTemplate?.label ?? currentGoalLabel, EMOTION_LABELS[emotion]);
-  const activeStrategyDetail = activeTemplate ?? strategyMatrixTiles[0] ?? null;
-  const activeStrategyInsight =
-    archiveRecommendation?.summary ??
-    activeStrategyDetail?.summary ??
-    "いま選んだ切り口をもとに、最初の市場反応を取りにいく導線を整えます。";
+  const activeStrategyDetail = activeTemplate ?? null;
+  const activeStrategyInsight = activeStrategyDetail
+    ? archiveRecommendation?.summary ?? activeStrategyDetail.summary
+    : null;
   const sprintTimelinePhases = useMemo(
     () =>
       seriesRoadmap.map((phase, index) => {
@@ -748,6 +745,12 @@ export function CreateWorkspace() {
     setSelectedPreviewIndex(0);
   }, [canvasPreviewTitle, generationMode, activeTemplateId]);
 
+  const sidePanelClass =
+    "h-full min-h-0 overflow-y-auto rounded-[30px] border border-white/65 bg-white/92 p-4 pb-24 shadow-[0_22px_80px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl [scrollbar-gutter:stable] dark:border-white/10 dark:bg-background/72";
+  const outputPanelClass =
+    "flex h-full min-h-0 flex-col overflow-y-auto rounded-[30px] border border-white/65 bg-white/92 p-4 pb-6 shadow-[0_22px_80px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl [scrollbar-gutter:stable] dark:border-white/10 dark:bg-background/72";
+  const laneDividerClass = "border-t border-border/40 pt-4";
+
   return (
     <div
       className={cn(
@@ -792,80 +795,45 @@ export function CreateWorkspace() {
         />
       </div>
 
-      <div className="relative mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-6 pb-28 md:px-6 xl:px-8 2xl:px-10">
-        <header className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[11px] font-medium tracking-wide text-muted-foreground">Seed Workspace</p>
-              <Badge variant="outline" className="rounded-full bg-background/70">
-                {generationMode === "single" ? "Labモード" : "Projectモード"}
+      <div className="relative mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 pb-4 pt-5 md:px-6 md:pt-8 xl:px-8 2xl:px-10 lg:h-[calc(100vh-4rem)]">
+        <div className="flex flex-1 min-h-0 flex-col gap-4">
+          <div className="hidden lg:grid lg:gap-5 lg:grid-cols-[minmax(280px,1fr)_minmax(440px,1.65fr)_minmax(320px,1.2fr)] xl:gap-6 xl:grid-cols-[minmax(300px,1fr)_minmax(520px,1.65fr)_minmax(340px,1.2fr)] 2xl:grid-cols-[minmax(320px,1fr)_minmax(580px,1.65fr)_minmax(360px,1.2fr)]">
+            <div className="flex items-end justify-between gap-3 border-b border-white/25 px-1 pb-1.5 dark:border-white/8">
+              <div>
+                <p className="text-[10px] font-medium tracking-[0.28em] text-muted-foreground/70">INPUT</p>
+                <p className="mt-0.5 text-xs text-muted-foreground/75">アイデア</p>
+              </div>
+              <Badge variant="secondary" className="h-4 rounded-full bg-background/40 px-1.5 text-[10px] text-muted-foreground/80 shadow-none">
+                入力 {inputCompletionCount}/2
               </Badge>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight md:text-3xl">思想に合う事業の種を、市場に届く仮説へ</h1>
-            <p className="max-w-2xl text-sm text-muted-foreground">
-              まずは完璧な事業計画ではなく、違和感・原体験・試したい仮説を置いてください。AI が発信案と検証ロードマップに変換します。
-            </p>
-          </div>
-
-          <div className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setPersonaBadgeOpen((open) => !open)}
-              className="flex items-center gap-2 rounded-2xl border bg-background/75 px-3 py-2 text-left shadow-sm backdrop-blur"
-              aria-expanded={personaBadgeOpen}
-            >
-              <Fingerprint className="size-4 text-primary" />
-              <div className="space-y-0.5">
-                <p className="text-xs font-medium">ペルソナDNA</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {personaStatus === "approved" ? "承認済み" : personaStatus === "draft" ? "確認待ち" : "未設定"}
-                </p>
+            <div className="flex items-end justify-between gap-3 border-b border-white/25 px-1 pb-1.5 dark:border-white/8">
+              <div>
+                <p className="text-[10px] font-medium tracking-[0.28em] text-muted-foreground/70">PROCESS</p>
+                <p className="mt-0.5 text-xs text-muted-foreground/75">{generationMode === "series" ? "検証スプリント設計" : "戦略とチューニング"}</p>
               </div>
-            </button>
-
-            <AnimatePresence initial={false}>
-              {personaBadgeOpen ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                  className="absolute right-0 z-20 mt-2 w-72 rounded-2xl border bg-background/95 p-4 shadow-xl backdrop-blur"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium">承認済みペルソナ</p>
-                      <Link href="/persona" className="text-xs text-primary underline-offset-4 hover:underline">
-                        更新
-                      </Link>
-                    </div>
-                    {personaSummary ? (
-                      <p className="text-xs leading-5 text-muted-foreground">{personaSummary}</p>
-                    ) : (
-                      <p className="text-xs leading-5 text-muted-foreground">
-                        まだ分析がありません。`/persona` で思想・強み・価値観を言語化できます。
-                      </p>
-                    )}
-                    {personaKeywords.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {personaKeywords.map((keyword) => (
-                          <Badge key={keyword} variant="secondary" className="rounded-full">
-                            {keyword}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </motion.div>
+              {generationMode === "series" ? (
+                <Badge variant="secondary" className="h-4 rounded-full bg-background/40 px-1.5 text-[10px] text-muted-foreground/80 shadow-none">
+                  検証スプリント
+                </Badge>
+              ) : activeTemplate ? (
+                <Badge variant="secondary" className="h-4 rounded-full bg-background/40 px-1.5 text-[10px] text-muted-foreground/80 shadow-none">
+                  {activeTemplate.label}
+                </Badge>
               ) : null}
-            </AnimatePresence>
+            </div>
+            <div className="flex items-end justify-between gap-3 border-b border-white/25 px-1 pb-1.5 dark:border-white/8">
+              <div>
+                <p className="text-[10px] font-medium tracking-[0.28em] text-muted-foreground/70">OUTPUT</p>
+                <p className="mt-0.5 text-xs text-muted-foreground/75">{generationMode === "series" ? "30日間の流れと山谷" : "比較と次の検証"}</p>
+              </div>
+              <p className="text-[10px] text-muted-foreground/70">{generationMode === "series" ? "Sprint Output" : "Live Output"}</p>
+            </div>
           </div>
-        </header>
 
-        <Card className="border-0 bg-card/80 shadow-xl backdrop-blur-md">
-          <CardContent className="space-y-6 p-6">
-            <div className="grid gap-4 lg:gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.45fr)_minmax(0,1.1fr)] 2xl:gap-6 2xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.48fr)_minmax(0,1.14fr)]">
-              <section className="space-y-4 rounded-3xl border bg-background/55 p-4">
-                <div className="space-y-1">
+          <div className="grid flex-1 min-h-0 gap-5 lg:h-full lg:grid-cols-[minmax(280px,1fr)_minmax(440px,1.65fr)_minmax(320px,1.2fr)] lg:items-start xl:gap-6 xl:grid-cols-[minmax(300px,1fr)_minmax(520px,1.65fr)_minmax(340px,1.2fr)] 2xl:grid-cols-[minmax(320px,1fr)_minmax(580px,1.65fr)_minmax(360px,1.2fr)]">
+              <section className={sidePanelClass}>
+                <div className="space-y-1 lg:hidden">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">INPUT</p>
                     <Badge variant="secondary" className="text-xs">
@@ -896,7 +864,7 @@ export function CreateWorkspace() {
                   {uploading ? "文字起こし中…" : "音声で仮説を置く"}
                 </label>
 
-                <div className="rounded-2xl border bg-background/85 p-4">
+                <div className={laneDividerClass}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold tracking-wide text-muted-foreground">DNA同期</p>
@@ -916,14 +884,14 @@ export function CreateWorkspace() {
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">{canvasDnaReason}</p>
                   ) : null}
                   {canvasWarning ? (
-                    <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200">
+                    <p className="mt-3 rounded-xl bg-rose-50/80 px-3 py-2 text-xs text-rose-700 dark:bg-rose-950/20 dark:text-rose-200">
                       {canvasWarning}
                     </p>
                   ) : null}
                 </div>
 
                 {canvasSummary ? (
-                  <div className="rounded-2xl border bg-background/85 p-4">
+                  <div className={laneDividerClass}>
                     <p className="text-xs font-semibold tracking-wide text-muted-foreground">AI要約</p>
                     <p className="mt-2 text-sm leading-6">今回ぶつける仮説はこれですね？</p>
                     <p className="mt-2 text-base font-medium">{canvasSummary}</p>
@@ -931,7 +899,7 @@ export function CreateWorkspace() {
                 ) : null}
 
                 {canvasQuestion ? (
-                  <div className="rounded-3xl border border-violet-200/80 bg-linear-to-br from-violet-50/90 via-background to-background p-4 shadow-sm dark:border-violet-800/60 dark:from-violet-950/25">
+                  <div className={cn(laneDividerClass, "bg-linear-to-br from-violet-50/50 via-transparent to-transparent dark:from-violet-950/10")}>
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold tracking-wide text-muted-foreground">AI WALL</p>
@@ -943,7 +911,7 @@ export function CreateWorkspace() {
                     </div>
                     <div className="mt-4 space-y-3">
                       <div className="flex justify-start">
-                        <div className="max-w-[92%] rounded-[22px] rounded-tl-md border border-violet-200/80 bg-violet-500/10 px-4 py-3 dark:border-violet-800/60 dark:bg-violet-500/10">
+                        <div className="max-w-[92%] rounded-[22px] rounded-tl-md bg-violet-500/10 px-4 py-3 dark:bg-violet-500/10">
                           <p className="text-[11px] font-semibold tracking-wide text-violet-700 dark:text-violet-200">
                             AIからの逆質問
                           </p>
@@ -954,7 +922,7 @@ export function CreateWorkspace() {
                         </div>
                       </div>
                       <div className="flex justify-end">
-                        <div className="w-full max-w-[94%] rounded-[22px] rounded-tr-md border bg-background/95 px-4 py-3 shadow-sm">
+                        <div className="w-full max-w-[94%] rounded-[22px] rounded-tr-md bg-background/70 px-4 py-3">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">あなたの返答</p>
                             <span className="text-[11px] text-muted-foreground">一言でOK</span>
@@ -979,13 +947,13 @@ export function CreateWorkspace() {
 
               <section
                 className={cn(
-                  "space-y-4 rounded-3xl border p-4 transition-all duration-500 ease-out",
+                  "h-full min-h-0 overflow-y-auto rounded-[30px] border p-4 pb-24 shadow-[0_26px_90px_-44px_rgba(15,23,42,0.6)] backdrop-blur-xl transition-all duration-500 ease-out [scrollbar-gutter:stable]",
                   isSprintMode
-                    ? "border-violet-300/70 bg-violet-950/[0.07] shadow-[0_24px_80px_-36px_rgba(124,58,237,0.65)] dark:border-violet-700/70 dark:bg-violet-950/25"
-                    : "bg-background/55",
+                    ? "border-violet-300/70 bg-white/95 shadow-[0_24px_80px_-36px_rgba(124,58,237,0.45)] dark:border-violet-700/70 dark:bg-violet-950/30"
+                    : "border-white/65 bg-white/92 dark:border-white/10 dark:bg-background/72",
                 )}
               >
-                <div className="space-y-1">
+                <div className="space-y-1 lg:hidden">
                   <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">PROCESS</p>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-medium">{generationMode === "series" ? "検証スプリント設計" : "戦略とチューニング"}</p>
@@ -1006,7 +974,7 @@ export function CreateWorkspace() {
                     key="strategy-mode-banner"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="rounded-2xl border border-violet-300/70 bg-linear-to-r from-violet-500/12 via-violet-500/6 to-transparent p-4 dark:border-violet-700/70"
+                    className={cn(laneDividerClass, "bg-linear-to-r from-violet-500/10 via-violet-500/5 to-transparent")}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -1021,12 +989,7 @@ export function CreateWorkspace() {
                   </motion.div>
                 ) : null}
 
-                <div
-                  className={cn(
-                    "rounded-2xl border bg-background/85 p-4 transition-all duration-300",
-                    hasRefinementAnswer && "border-violet-200/80 shadow-[0_0_0_1px_rgba(139,92,246,0.10)] dark:border-violet-800/60",
-                  )}
-                >
+                <div className={cn(laneDividerClass, hasRefinementAnswer && "text-violet-950 dark:text-violet-50")}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
                       <p className="text-xs font-semibold tracking-wide text-muted-foreground">Hypothesis Summary</p>
@@ -1052,7 +1015,7 @@ export function CreateWorkspace() {
                 </div>
 
                 {canChooseSprint ? (
-                  <div className="rounded-2xl border bg-background/85 p-4">
+                  <div className={laneDividerClass}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="space-y-1">
                         <p className="text-xs font-semibold tracking-wide text-muted-foreground">検証ルート</p>
@@ -1067,8 +1030,8 @@ export function CreateWorkspace() {
                         type="button"
                         onClick={() => setGenerationMode("single")}
                         className={cn(
-                          "rounded-2xl border bg-background/80 p-4 text-left transition-all hover:bg-background",
-                          generationMode === "single" && cn("border-foreground/30 bg-background shadow-sm ring-2 ring-offset-2", chameleon.ring),
+                          "rounded-2xl bg-muted/35 p-4 text-left transition-all hover:bg-muted/55",
+                          generationMode === "single" && cn("bg-background ring-2 ring-offset-2", chameleon.ring),
                         )}
                       >
                         <p className="text-sm font-semibold">単発検証</p>
@@ -1080,8 +1043,8 @@ export function CreateWorkspace() {
                         type="button"
                         onClick={() => setGenerationMode("series")}
                         className={cn(
-                          "rounded-2xl border bg-background/80 p-4 text-left transition-all hover:bg-background",
-                          generationMode === "series" && "border-violet-300 bg-violet-50/60 shadow-sm ring-2 ring-violet-200 ring-offset-2 dark:border-violet-700 dark:bg-violet-950/20 dark:ring-violet-900/60",
+                          "rounded-2xl bg-muted/35 p-4 text-left transition-all hover:bg-muted/55",
+                          generationMode === "series" && "bg-background ring-2 ring-violet-200 ring-offset-2 dark:bg-violet-950/20 dark:ring-violet-900/60",
                         )}
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -1095,7 +1058,7 @@ export function CreateWorkspace() {
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-2xl border border-dashed bg-background/85 p-4">
+                  <div className={cn(laneDividerClass, "text-muted-foreground")}>
                     <p className="text-xs font-semibold tracking-wide text-muted-foreground">検証ルート</p>
                     <p className="mt-2 text-sm text-muted-foreground">
                       左カラムの入力がまとまり、1行仮説に圧縮されると、ここに検証スプリントの選択肢が現れます。
@@ -1104,7 +1067,7 @@ export function CreateWorkspace() {
                 )}
 
                 {generationMode === "series" ? (
-                  <div className="rounded-2xl border bg-background/85 p-4">
+                  <div className={laneDividerClass}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="space-y-1">
                         <p className="text-xs font-semibold tracking-wide text-muted-foreground">スプリントタイムライン</p>
@@ -1114,7 +1077,7 @@ export function CreateWorkspace() {
                     </div>
                     <div className="mt-4 grid gap-3 xl:grid-cols-3">
                       {sprintTimelinePhases.map((phase, index) => (
-                        <div key={phase.rangeLabel} className={cn("rounded-2xl border bg-background/80 p-4", phase.style.border)}>
+                        <div key={phase.rangeLabel} className="rounded-2xl bg-background/35 p-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">{phase.rangeLabel}</p>
@@ -1124,17 +1087,17 @@ export function CreateWorkspace() {
                           </div>
                           <p className="mt-3 text-sm font-medium">{phase.goal}</p>
                           <p className="mt-1 text-xs leading-5 text-muted-foreground">{phase.objective}</p>
-                          <div className={cn("mt-4 rounded-xl border p-3", phase.style.border, phase.style.glow)}>
+                          <div className={cn("mt-4 rounded-xl p-3", phase.style.glow)}>
                             <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">やること</p>
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">{phase.detail}</p>
                           </div>
                         </div>
                       ))}
                     </div>
-                    <div className="mt-4 rounded-2xl border bg-muted/20 p-3">
+                    <div className="mt-4 px-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground">
+                          <span className="inline-flex size-8 items-center justify-center rounded-full bg-background/70 text-muted-foreground">
                             <BookOpen className="size-4" />
                           </span>
                           <div>
@@ -1152,7 +1115,7 @@ export function CreateWorkspace() {
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-2xl border bg-background/85 p-4">
+                  <div className={laneDividerClass}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="space-y-1">
                         <p className="text-xs font-semibold tracking-wide text-muted-foreground">Strategy Matrix</p>
@@ -1172,10 +1135,10 @@ export function CreateWorkspace() {
                             type="button"
                             onClick={() => applyStrategyTemplate(template.id)}
                             className={cn(
-                              "flex min-h-[248px] flex-col rounded-3xl border bg-background/80 px-4 py-4 text-left transition-all hover:bg-background/95",
+                              "flex min-h-[248px] flex-col rounded-3xl bg-muted/35 px-4 py-4 text-left transition-all hover:bg-muted/55",
                               active
-                                ? cn("border-foreground/30 bg-background shadow-sm ring-2 ring-offset-2", chameleon.ring)
-                                : "border-border/70 hover:border-border",
+                                ? cn("bg-background ring-2 ring-offset-2", chameleon.ring)
+                                : "",
                             )}
                           >
                             <div className="flex items-start justify-between gap-3">
@@ -1186,13 +1149,13 @@ export function CreateWorkspace() {
                                     className={cn(
                                       "size-3.5 transition-all",
                                       index < fireCount
-                                        ? "fill-orange-500/20 text-orange-500 dark:fill-orange-400/25 dark:text-orange-400 opacity-100"
-                                        : "text-zinc-300/65 dark:text-zinc-700/70 opacity-100",
+                                        ? "fill-orange-500/25 text-orange-600 dark:fill-orange-400/30 dark:text-orange-400 opacity-100"
+                                        : "text-zinc-200/40 dark:text-zinc-800/45 opacity-70",
                                     )}
                                   />
                                 ))}
                               </div>
-                              <span className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground">
+                              <span className="inline-flex size-8 items-center justify-center rounded-full bg-background/70 text-muted-foreground">
                                 {meta.icon}
                               </span>
                             </div>
@@ -1200,77 +1163,65 @@ export function CreateWorkspace() {
                               <p className="text-base font-semibold">{template.label}</p>
                               <p className="mt-2 text-sm leading-6 text-muted-foreground">{template.summary}</p>
                             </div>
-                            <div className="mt-4 border-t border-border/60 pt-3">
-                              <AnimatePresence initial={false} mode="wait">
-                                {active ? (
-                                  <motion.div
-                                    key={`${template.id}-details-active`}
-                                    initial={{ opacity: 0, y: 8 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -4 }}
-                                    className="flex min-h-[44px] flex-wrap gap-2"
-                                  >
-                                    <span className="rounded-full bg-muted/60 px-2.5 py-1 text-[11px] text-muted-foreground">
-                                      目的: {GOAL_LABELS[template.strategyGoal]}
-                                    </span>
-                                    <span className="rounded-full bg-muted/60 px-2.5 py-1 text-[11px] text-muted-foreground">
-                                      トーン: {EMOTION_LABELS[template.emotion]}
-                                    </span>
-                                  </motion.div>
-                                ) : (
-                                  <motion.div
-                                    key={`${template.id}-details-idle`}
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    className="flex min-h-[44px] items-center text-[11px] text-muted-foreground/70"
-                                  >
-                                    選択すると、この切り口の狙いがここに表示されます
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
                           </button>
                         );
                       })}
                     </div>
-                    {activeStrategyDetail ? (
-                      <div className="mt-4 flex items-start gap-3 rounded-2xl border-l-2 border-violet-200/80 bg-violet-500/4 px-3 py-2 dark:border-violet-800/60 dark:bg-violet-500/8">
-                        <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground">
-                          <BookOpen className="size-4" />
-                        </span>
-                        <div className="min-w-0 pt-0.5">
-                          <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">AI Insight</p>
-                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                            {activeStrategyInsight}{" "}
-                            <Link href="/archive" className="text-primary underline-offset-4 hover:underline">
-                              Archiveへ
-                            </Link>
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
+                    <div className="mt-4 border-t border-border/40 pt-4">
+                      <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">選択中の戦略詳細</p>
+                      {activeStrategyDetail ? (
+                        <>
+                          <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                            <span className="inline-flex items-center gap-1.5">
+                              <Flame className="size-3.5 text-orange-500" />
+                              ターゲットの目的: {GOAL_LABELS[activeStrategyDetail.strategyGoal]}
+                            </span>
+                            <span className="inline-flex items-center gap-1.5">
+                              <BookOpen className="size-3.5 text-violet-500" />
+                              推奨トーン: {EMOTION_LABELS[activeStrategyDetail.emotion]}
+                            </span>
+                          </div>
+                          <div className="mt-3 flex items-start gap-3 rounded-2xl bg-linear-to-r from-amber-50 via-violet-50/70 to-transparent px-3 py-2 dark:from-amber-950/10 dark:via-violet-950/20">
+                            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-background/70 text-muted-foreground">
+                              <BookOpen className="size-4" />
+                            </span>
+                            <div className="min-w-0 pt-0.5">
+                              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                                {activeStrategyInsight}{" "}
+                                <Link href="/archive" className="text-primary underline-offset-4 hover:underline">
+                                  Archiveへ
+                                </Link>
+                              </p>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="mt-2 text-xs text-muted-foreground">戦略を選択してください</p>
+                      )}
+                    </div>
                   </div>
                 )}
 
                 {error ? <p className="text-center text-sm text-destructive">{error}</p> : null}
               </section>
 
-              <section className="space-y-4 rounded-3xl border bg-background/55 p-4">
-                <div className="space-y-1">
+              <section className={outputPanelClass}>
+                <div className="space-y-1 lg:hidden">
                   <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">OUTPUT</p>
                   <p className="text-sm font-medium">{generationMode === "series" ? "30日間の流れと山谷" : "比較と次の検証"}</p>
                 </div>
-
-                <div className="rounded-2xl border bg-background/85 p-4">
-                  <p className="text-xs font-semibold tracking-wide text-muted-foreground">保存ステータス</p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    生成結果は Archive に自動保存されます。コピーより先に、反応ログとして育てる前提です。
-                  </p>
-                  <div className="mt-3 rounded-2xl border bg-muted/20 p-3">
-                    <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
-                      {generationMode === "series" ? "スプリント名の下書き" : "ライブタイトル"}
-                    </p>
+                <div className="space-y-4 pb-4">
+                <div className="pb-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground/70">LIVE TITLE</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground/65">
+                        生成結果は Archive に自動保存されます。反応ログとして育てる前提です。
+                      </p>
+                    </div>
+                    <span className="rounded-full border px-2 py-1 text-[10px] text-muted-foreground/65">Auto saved</span>
+                  </div>
+                  <div className="mt-4 border-t border-border/40 pt-3">
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.p
                         key={`${activeTemplateId ?? "none"}-${emotion}-${intensity}-${canvasPreviewTitle || "empty"}`}
@@ -1289,7 +1240,7 @@ export function CreateWorkspace() {
                 </div>
 
                 {generationMode === "series" ? (
-                  <div className="rounded-2xl border bg-background/85 p-4">
+                  <div className={laneDividerClass}>
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="text-xs font-semibold tracking-wide text-muted-foreground">スプリントプレビュー</p>
@@ -1299,8 +1250,8 @@ export function CreateWorkspace() {
                         30日フロー
                       </Badge>
                     </div>
-                    <div className="mt-4 rounded-3xl border bg-muted/20 p-4">
-                      <div className="flex items-end gap-1 rounded-2xl border bg-background/80 px-3 pb-3 pt-6">
+                    <div className="mt-4 bg-muted/20 p-4">
+                      <div className="flex items-end gap-1 px-3 pb-3 pt-6">
                         {sprintFlowDays.map((item) => (
                           <div key={item.day} className="flex min-w-0 flex-1 items-end">
                             <motion.div
@@ -1316,7 +1267,7 @@ export function CreateWorkspace() {
                       </div>
                       <div className="mt-3 grid gap-2 text-[11px] text-muted-foreground md:grid-cols-3">
                         {sprintTimelinePhases.map((phase) => (
-                          <div key={phase.rangeLabel} className={cn("rounded-xl border p-3", phase.style.border, phase.style.glow)}>
+                          <div key={phase.rangeLabel} className={cn("rounded-xl p-3", phase.style.glow)}>
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-semibold">{phase.rangeLabel}</span>
                               <Badge className={cn("rounded-full", phase.style.tone)}>{phase.slot?.title ?? phase.focus}</Badge>
@@ -1328,7 +1279,7 @@ export function CreateWorkspace() {
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-2xl border bg-background/85 p-4">
+                  <div className={laneDividerClass}>
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="text-xs font-semibold tracking-wide text-muted-foreground">ライブプレビュー</p>
@@ -1338,7 +1289,7 @@ export function CreateWorkspace() {
                         Title only
                       </Badge>
                     </div>
-                    <div className="mt-3 space-y-2">
+                    <div className="mt-4 divide-y divide-border/35">
                       {previewCandidates.map((candidate, index) => {
                         const active = selectedPreviewIndex === index;
                         return (
@@ -1347,8 +1298,8 @@ export function CreateWorkspace() {
                             type="button"
                             onClick={() => setSelectedPreviewIndex(index)}
                             className={cn(
-                              "w-full rounded-2xl border bg-background/90 p-3 text-left transition-all hover:bg-background",
-                              active ? cn("shadow-sm ring-2 ring-offset-2", chameleon.ring) : "border-border/70",
+                              "w-full rounded-2xl px-0 py-4 text-left first:pt-0 transition-all",
+                              active ? cn("bg-background/88 px-3 shadow-[0_12px_28px_-18px_rgba(15,23,42,0.28)] opacity-100", chameleon.ring) : "opacity-85",
                             )}
                           >
                             <div className="flex items-start justify-between gap-2">
@@ -1387,23 +1338,23 @@ export function CreateWorkspace() {
 
                 {!loading &&
                 ((resultMode === "single" && variants.length === 3) || (resultMode === "series" && seriesItems.length === 3)) ? (
-                  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={cn(laneDividerClass, "space-y-5")}>
                     {ghostWhisper ? (
-                      <div className="rounded-2xl border border-violet-200/70 bg-violet-50/70 p-3 text-sm text-violet-950 dark:border-violet-800/60 dark:bg-violet-950/30 dark:text-violet-100">
+                      <div className="border-l-2 border-violet-200/70 pl-3 text-sm text-violet-950 dark:border-violet-800/60 dark:text-violet-100">
                         <p className="text-xs font-semibold uppercase tracking-wide">Persona DNA からの示唆</p>
                         <p className="mt-1 leading-relaxed">{ghostWhisper}</p>
                       </div>
                     ) : null}
 
                     {resultMode === "series" ? (
-                      <div className="rounded-2xl border bg-muted/20 p-4">
+                      <div className="bg-muted/20 p-4">
                         <p className="text-sm font-medium text-muted-foreground">検証スプリント名</p>
                         <p className="mt-1 text-lg font-semibold text-foreground">{seriesTitle}</p>
                       </div>
                     ) : null}
 
                     {resultMode === "single" ? (
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-background/85 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <p className="text-xs font-semibold tracking-wide text-muted-foreground">Persona DNAの微調整</p>
                           <p className="mt-1 text-sm text-muted-foreground">
@@ -1441,7 +1392,7 @@ export function CreateWorkspace() {
                     ) : null}
 
                     {resultMode === "series" ? (
-                      <div className="rounded-3xl border bg-background/90 p-4 shadow-sm">
+                      <div className="space-y-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
                             <p className="text-xs font-semibold tracking-wide text-muted-foreground">30日間の大きな流れ</p>
@@ -1451,8 +1402,8 @@ export function CreateWorkspace() {
                             ガント風ビュー
                           </Badge>
                         </div>
-                        <div className="mt-4 rounded-3xl border bg-muted/20 p-4">
-                          <div className="flex items-end gap-1 rounded-2xl border bg-background/80 px-3 pb-3 pt-6">
+                        <div className="bg-muted/20 p-4">
+                          <div className="flex items-end gap-1 px-3 pb-3 pt-6">
                             {sprintFlowDays.map((item) => (
                               <div key={item.day} className="flex min-w-0 flex-1 items-end">
                                 <motion.div
@@ -1477,7 +1428,7 @@ export function CreateWorkspace() {
                               const item = seriesItems[index];
 
                               return (
-                                <div key={phase.rangeLabel} className={cn("rounded-2xl border p-4", phase.style.border, phase.style.glow)}>
+                                <div key={phase.rangeLabel} className={cn("rounded-2xl p-4", phase.style.glow)}>
                                   <div className="flex items-center justify-between gap-2">
                                     <Badge className={cn("rounded-full", phase.style.tone)}>{phase.slot?.title ?? phase.focus}</Badge>
                                     <span className="text-[11px] font-semibold text-muted-foreground">{phase.rangeLabel}</span>
@@ -1485,7 +1436,7 @@ export function CreateWorkspace() {
                                   <p className="mt-3 text-sm font-medium">{phase.goal}</p>
                                   <p className="mt-2 text-xs leading-5 text-muted-foreground">{item?.body ?? phase.detail}</p>
                                   {item?.validationMetric ? (
-                                    <div className="mt-3 rounded-xl border border-dashed bg-background/80 p-3">
+                                    <div className="mt-3 border-l-2 border-dashed border-border/50 pl-3">
                                       <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">成功指標</p>
                                       <p className="mt-1 text-xs text-muted-foreground">{item.validationMetric}</p>
                                     </div>
@@ -1497,7 +1448,7 @@ export function CreateWorkspace() {
                         </div>
                       </div>
                     ) : (
-                      <div className="space-y-3">
+                      <div className="divide-y divide-border/35">
                         {variants.map((text, index) => {
                           const picked = selectedIndex === index;
                           const variantFocus = variantFocuses[index] ?? `仮説の切り口 ${index + 1}`;
@@ -1509,8 +1460,10 @@ export function CreateWorkspace() {
                               type="button"
                               onClick={() => selectVariant(index)}
                               className={cn(
-                                "w-full rounded-2xl border-2 bg-background/90 p-4 text-left shadow-sm transition-all hover:shadow-md",
-                                picked ? cn("ring-2 ring-offset-2", chameleon.ring) : "border-border",
+                              "w-full rounded-2xl px-0 py-5 text-left first:pt-0 transition-all",
+                              picked
+                                ? cn("bg-background/92 px-3 shadow-[0_12px_28px_-18px_rgba(15,23,42,0.26)] opacity-100", chameleon.ring)
+                                : "opacity-88",
                               )}
                             >
                               <div className="flex items-center justify-between gap-2">
@@ -1528,7 +1481,7 @@ export function CreateWorkspace() {
                     )}
 
                     {adviceHint ? (
-                      <div className="rounded-xl border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground">
+                      <div className="border-l-2 border-dashed border-border/50 pl-3 text-xs text-muted-foreground">
                         観測ポイント: {adviceHint}
                       </div>
                     ) : null}
@@ -1575,14 +1528,14 @@ export function CreateWorkspace() {
                     </div>
                   </motion.div>
                 ) : (
-                  <div className="space-y-3">
-                    <div className="rounded-2xl border border-dashed bg-background/80 p-4">
+                  <div className={cn(laneDividerClass, "space-y-3")}>
+                    <div className="border-l-2 border-dashed border-border/50 pl-3">
                       <p className="text-xs font-semibold tracking-wide text-muted-foreground">本文はまだ確定していません</p>
                       <p className="mt-2 text-sm text-muted-foreground">
                         今は右上のタイトル断片だけがリアルタイムで育っています。気になる案が見つかったら、下のバーから検証を開始してください。
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-dashed bg-background/80 p-4">
+                    <div className="border-l-2 border-dashed border-border/50 pl-3">
                       <p className="text-xs font-semibold tracking-wide text-muted-foreground">比較の視点</p>
                       <p className="mt-2 text-sm text-muted-foreground">
                         先に見出しの切れ味を見つけてから、本文を重く生成する流れに変えています。
@@ -1590,31 +1543,29 @@ export function CreateWorkspace() {
                     </div>
                   </div>
                 )}
-              </section>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 px-4">
-        <div className="pointer-events-auto mx-auto w-full max-w-[1560px] rounded-2xl border bg-background/92 p-3 shadow-2xl backdrop-blur">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold tracking-wide text-muted-foreground">Deploy</p>
-              <p className="mt-1 truncate text-sm font-medium">{deployTitle}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{deployHint}</p>
-            </div>
-            <Button
-              type="button"
-              size="lg"
-              disabled={!storedSeed.trim() || uploading || loading || (canvasQuestion !== "" && !hasRefinementAnswer)}
-              onClick={() => {
-                void runGenerate({ modeOverride: generationMode });
-              }}
-              className="min-w-[240px]"
-            >
-              {loading ? "本文を組み立て中…" : generationMode === "series" ? "現在の仮説で検証スプリントを設計する" : "現在の仮説で検証を開始する"}
-            </Button>
+                <div className="mt-auto border-t border-border/40 pt-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground/70">DEPLOY</p>
+                      <p className="mt-1 truncate text-sm font-medium">{deployTitle}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{deployHint}</p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="lg"
+                      disabled={!storedSeed.trim() || uploading || loading || (canvasQuestion !== "" && !hasRefinementAnswer)}
+                      onClick={() => {
+                        void runGenerate({ modeOverride: generationMode });
+                      }}
+                      className="min-w-[220px]"
+                    >
+                      {loading ? "本文を組み立て中…" : generationMode === "series" ? "現在の仮説で検証スプリントを設計する" : "現在の仮説で検証を開始する"}
+                    </Button>
+                  </div>
+                </div>
+                </div>
+              </section>
           </div>
         </div>
       </div>
