@@ -1,13 +1,27 @@
 import { EMOTION_LABELS, type EmotionTone } from "@/lib/emotions";
-import type { ArchiveInsights, GenerationRecord, GenerationSeriesRecord } from "@/lib/types";
+import type { ArchiveInsights, QuickFeedback } from "@/lib/types";
+
+export type ArchiveInsightSingleInput = {
+  emotion: EmotionTone;
+  intensity: number;
+  quickFeedback?: QuickFeedback;
+};
+
+export type ArchiveInsightSeriesInput = {
+  emotion: EmotionTone;
+  intensity: number;
+  items: Array<{
+    quickFeedback?: QuickFeedback;
+  }>;
+};
 
 function toIntensityBucket(intensity: number): number {
   return Math.round(intensity / 10) * 10;
 }
 
 export function buildArchiveInsights(
-  singles: GenerationRecord[],
-  series: GenerationSeriesRecord[],
+  singles: ArchiveInsightSingleInput[],
+  series: ArchiveInsightSeriesInput[],
 ): ArchiveInsights {
   const emotions: EmotionTone[] = ["empathy", "toxic", "mood", "useful", "minimal"];
 

@@ -1,6 +1,10 @@
 import type { User } from "@supabase/supabase-js";
 import type { EmotionTone } from "@/lib/emotions";
-import { buildArchiveInsights } from "@/lib/archive-insights";
+import {
+  buildArchiveInsights,
+  type ArchiveInsightSeriesInput,
+  type ArchiveInsightSingleInput,
+} from "@/lib/archive-insights";
 import { inferMemoryTags } from "@/lib/memory-tags";
 import { getSeriesSlotLabel, type SeriesSlotKey } from "@/lib/series";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -19,6 +23,17 @@ export const DEMO_USER_ID = "11111111-1111-4111-8111-111111111111";
 export const DEMO_USER_EMAIL = "demo@emoswitch.local";
 const DEMO_USER_PASSWORD = "EmoSwitchDemo#2026";
 const DEMO_DISPLAY_NAME = "デモユーザー";
+const ENSURED_USER_TTL_MS = 5 * 60_000;
+const AUTH_USER_TTL_MS = 60_000;
+const ARCHIVE_OVERVIEW_TTL_MS = 15_000;
+
+const ensuredUserCache = new Map<string, number>();
+const authenticatedUserCache = new Map<string, { user: User; expiresAt: number }>();
+const archiveOverviewCache = new Map<string, { value: ArchiveOverview; expiresAt: number }>();
+
+let demoUserPromise: Promise<string> | null = null;
+let demoWorkspacePromise: Promise<{ userId: string; seeded: boolean }> | null = null;
+let demoWorkspaceReady = false;
 
 type DbGenerationRow = {
   id: string;
@@ -79,6 +94,23 @@ type DbSeriesItemRow = {
   memo: string | null;
   memory_tags: string[] | null;
   deleted_at: string | null;
+};
+
+type DbArchiveInsightSingleRow = {
+  emotion: EmotionTone;
+  intensity: number;
+  quick_feedback: QuickFeedback;
+};
+
+type DbArchiveInsightSeriesRow = {
+  id: string;
+  emotion: EmotionTone;
+  intensity: number;
+};
+
+type DbArchiveInsightSeriesItemRow = {
+  series_id: string;
+  quick_feedback: QuickFeedback;
 };
 
 type SeriesInsertItem = {
@@ -467,31 +499,72 @@ function getBearerToken(request: Request): string | null {
   return token;
 }
 
+function readEnsuredUserCache(userId: string): boolean {
+  const expiresAt = ensuredUserCache.get(userId);
+  if (!expiresAt) return false;
+  if (Date.now() >= expiresAt) {
+    ensuredUserCache.delete(userId);
+    return false;
+  }
+  return true;
+}
+
+function markUserEnsured(userId: string): void {
+  ensuredUserCache.set(userId, Date.now() + ENSURED_USER_TTL_MS);
+}
+
+function trimCache<T>(cache: Map<string, T>, maxEntries: number): void {
+  if (cache.size <= maxEntries) return;
+  const firstKey = cache.keys().next().value;
+  if (firstKey) cache.delete(firstKey);
+}
+
 async function ensureAuthenticatedUser(user: User): Promise<string> {
   const userId = user.id;
-  const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
-    .from("profiles")
-    .select("display_name")
-    .eq("id", userId)
-    .maybeSingle<{ display_name: string | null }>();
-
-  if (existingProfileError) {
-    throw existingProfileError;
+  if (readEnsuredUserCache(userId)) {
+    return userId;
   }
 
   const { error: profileError } = await supabaseAdmin.from("profiles").upsert(
     {
       id: userId,
       email: user.email ?? `${userId}@users.emoswitch.local`,
-      display_name: existingProfile?.display_name ?? getUserDisplayName(user),
+      display_name: getUserDisplayName(user),
       is_demo: false,
     },
-    { onConflict: "id" },
+    { onConflict: "id", ignoreDuplicates: true },
   );
 
   if (profileError) throw profileError;
 
+  markUserEnsured(userId);
   return userId;
+}
+
+async function getAuthenticatedUserFromToken(token: string): Promise<User> {
+  const cached = authenticatedUserCache.get(token);
+  if (cached && cached.expiresAt > Date.now()) {
+    await ensureAuthenticatedUser(cached.user);
+    return cached.user;
+  }
+
+  const {
+    data: { user },
+    error,
+  } = await supabaseAdmin.auth.getUser(token);
+
+  if (error || !user) {
+    authenticatedUserCache.delete(token);
+    throw new Error("認証ユーザーの取得に失敗しました");
+  }
+
+  authenticatedUserCache.set(token, {
+    user,
+    expiresAt: Date.now() + AUTH_USER_TTL_MS,
+  });
+  trimCache(authenticatedUserCache, 100);
+  await ensureAuthenticatedUser(user);
+  return user;
 }
 
 async function requireGenerationById(id: string, userId?: string): Promise<GenerationRecord> {
@@ -544,73 +617,92 @@ async function requireGenerationSeriesById(id: string, userId?: string): Promise
 }
 
 export async function ensureDemoUser(): Promise<string> {
-  const { error: createError } = await supabaseAdmin.auth.admin.createUser({
-    id: DEMO_USER_ID,
-    email: DEMO_USER_EMAIL,
-    password: DEMO_USER_PASSWORD,
-    email_confirm: true,
-    user_metadata: { display_name: DEMO_DISPLAY_NAME, is_demo: true },
-    app_metadata: { provider: "email", providers: ["email"] },
-  });
+  if (!demoUserPromise) {
+    demoUserPromise = (async () => {
+      const { error: createError } = await supabaseAdmin.auth.admin.createUser({
+        id: DEMO_USER_ID,
+        email: DEMO_USER_EMAIL,
+        password: DEMO_USER_PASSWORD,
+        email_confirm: true,
+        user_metadata: { display_name: DEMO_DISPLAY_NAME, is_demo: true },
+        app_metadata: { provider: "email", providers: ["email"] },
+      });
 
-  if (createError && !/already registered|already exists|duplicate/i.test(createError.message)) {
-    throw createError;
+      if (createError && !/already registered|already exists|duplicate/i.test(createError.message)) {
+        throw createError;
+      }
+
+      const { error: profileError } = await supabaseAdmin.from("profiles").upsert(
+        {
+          id: DEMO_USER_ID,
+          email: DEMO_USER_EMAIL,
+          display_name: DEMO_DISPLAY_NAME,
+          is_demo: true,
+        },
+        { onConflict: "id", ignoreDuplicates: true },
+      );
+
+      if (profileError) {
+        throw profileError;
+      }
+
+      markUserEnsured(DEMO_USER_ID);
+      return DEMO_USER_ID;
+    })().catch((error) => {
+      demoUserPromise = null;
+      throw error;
+    });
   }
 
-  const { error: profileError } = await supabaseAdmin.from("profiles").upsert(
-    {
-      id: DEMO_USER_ID,
-      email: DEMO_USER_EMAIL,
-      display_name: DEMO_DISPLAY_NAME,
-      is_demo: true,
-    },
-    { onConflict: "id" },
-  );
-
-  if (profileError) {
-    throw profileError;
-  }
-
-  return DEMO_USER_ID;
+  return demoUserPromise;
 }
 
 export async function bootstrapDemoWorkspace(): Promise<{ userId: string; seeded: boolean }> {
-  const userId = await ensureDemoUser();
+  if (demoWorkspaceReady) {
+    return { userId: DEMO_USER_ID, seeded: false };
+  }
 
-  const [
-    { count: generationCount, error: generationCountError },
-    { count: seriesCount, error: seriesCountError },
-    { count: ledgerCount, error: ledgerCountError },
-    { count: sourceCount, error: sourceCountError },
-    { count: ghostSettingsCount, error: ghostSettingsCountError },
-  ] =
-    await Promise.all([
-      supabaseAdmin
-        .from("generations")
-        .select("id", { head: true, count: "exact" })
-        .eq("user_id", userId)
-        .is("deleted_at", null),
-      supabaseAdmin
-        .from("generation_series")
-        .select("id", { head: true, count: "exact" })
-        .eq("user_id", userId)
-        .is("deleted_at", null),
-      supabaseAdmin.from("credit_ledger").select("id", { head: true, count: "exact" }).eq("user_id", userId),
-      supabaseAdmin
-        .from("ghost_sources")
-        .select("id", { head: true, count: "exact" })
-        .eq("user_id", userId)
-        .is("deleted_at", null),
-      supabaseAdmin.from("ghost_settings").select("user_id", { head: true, count: "exact" }).eq("user_id", userId),
-    ]);
+  if (demoWorkspacePromise) {
+    return demoWorkspacePromise;
+  }
 
-  if (generationCountError) throw generationCountError;
-  if (seriesCountError) throw seriesCountError;
-  if (ledgerCountError) throw ledgerCountError;
-  if (sourceCountError) throw sourceCountError;
-  if (ghostSettingsCountError) throw ghostSettingsCountError;
+  demoWorkspacePromise = (async () => {
+    const userId = await ensureDemoUser();
 
-  const seeded = (generationCount ?? 0) === 0;
+    const [
+      { count: generationCount, error: generationCountError },
+      { count: seriesCount, error: seriesCountError },
+      { count: ledgerCount, error: ledgerCountError },
+      { count: sourceCount, error: sourceCountError },
+      { count: ghostSettingsCount, error: ghostSettingsCountError },
+    ] =
+      await Promise.all([
+        supabaseAdmin
+          .from("generations")
+          .select("id", { head: true, count: "exact" })
+          .eq("user_id", userId)
+          .is("deleted_at", null),
+        supabaseAdmin
+          .from("generation_series")
+          .select("id", { head: true, count: "exact" })
+          .eq("user_id", userId)
+          .is("deleted_at", null),
+        supabaseAdmin.from("credit_ledger").select("id", { head: true, count: "exact" }).eq("user_id", userId),
+        supabaseAdmin
+          .from("ghost_sources")
+          .select("id", { head: true, count: "exact" })
+          .eq("user_id", userId)
+          .is("deleted_at", null),
+        supabaseAdmin.from("ghost_settings").select("user_id", { head: true, count: "exact" }).eq("user_id", userId),
+      ]);
+
+    if (generationCountError) throw generationCountError;
+    if (seriesCountError) throw seriesCountError;
+    if (ledgerCountError) throw ledgerCountError;
+    if (sourceCountError) throw sourceCountError;
+    if (ghostSettingsCountError) throw ghostSettingsCountError;
+
+    const seeded = (generationCount ?? 0) === 0;
 
   if (seeded) {
     const { error: generationInsertError } = await supabaseAdmin.from("generations").insert(
@@ -746,7 +838,14 @@ export async function bootstrapDemoWorkspace(): Promise<{ userId: string; seeded
     }
   }
 
-  return { userId, seeded };
+    demoWorkspaceReady = true;
+    return { userId, seeded };
+  })().catch((error) => {
+    demoWorkspacePromise = null;
+    throw error;
+  });
+
+  return demoWorkspacePromise;
 }
 
 export async function resolveRequestActor(request: Request): Promise<AppActor> {
@@ -757,17 +856,8 @@ export async function resolveRequestActor(request: Request): Promise<AppActor> {
     return { userId, mode: "demo" };
   }
 
-  const {
-    data: { user },
-    error,
-  } = await supabaseAdmin.auth.getUser(token);
-
-  if (error || !user) {
-    throw new Error("認証ユーザーの取得に失敗しました");
-  }
-
-  const userId = await ensureAuthenticatedUser(user);
-  return { userId, mode: "auth" };
+  const user = await getAuthenticatedUserFromToken(token);
+  return { userId: user.id, mode: "auth" };
 }
 
 export async function requireAuthenticatedUserFromRequest(request: Request): Promise<User> {
@@ -777,17 +867,7 @@ export async function requireAuthenticatedUserFromRequest(request: Request): Pro
     throw new Error("ログインが必要です");
   }
 
-  const {
-    data: { user },
-    error,
-  } = await supabaseAdmin.auth.getUser(token);
-
-  if (error || !user) {
-    throw new Error("認証ユーザーの取得に失敗しました");
-  }
-
-  await ensureAuthenticatedUser(user);
-  return user;
+  return getAuthenticatedUserFromToken(token);
 }
 
 async function resolveScopedUserId(userId?: string): Promise<string> {
@@ -852,14 +932,92 @@ export async function listGenerationSeries(userId?: string): Promise<GenerationS
 }
 
 export async function getArchiveOverview(userId?: string): Promise<ArchiveOverview> {
-  const [entries, series] = await Promise.all([listGenerations(userId), listGenerationSeries(userId)]);
-  const singles = entries.filter((entry) => entry.generationMode === "single");
-  const allEntries = [...singles, ...series].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  return getArchiveOverviewWithOptions(userId);
+}
 
-  return {
-    entries: allEntries,
-    insights: buildArchiveInsights(singles, series),
-  };
+export async function getArchiveOverviewWithOptions(
+  userId?: string,
+  options?: { includeEntries?: boolean },
+): Promise<ArchiveOverview> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const includeEntries = options?.includeEntries ?? true;
+  const cacheKey = `${scopedUserId}:${includeEntries ? "full" : "summary"}`;
+  const cached = archiveOverviewCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const overview = includeEntries
+    ? await (async () => {
+        const [entries, series] = await Promise.all([listGenerations(scopedUserId), listGenerationSeries(scopedUserId)]);
+        const singles = entries.filter((entry) => entry.generationMode === "single");
+        const allEntries = [...singles, ...series].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+        return {
+          entries: allEntries,
+          insights: buildArchiveInsights(singles, series),
+        } satisfies ArchiveOverview;
+      })()
+    : await (async () => {
+        const [{ data: singleRows, error: singleError }, { data: seriesRows, error: seriesError }, { data: seriesItemRows, error: seriesItemError }] =
+          await Promise.all([
+            supabaseAdmin
+              .from("generations")
+              .select("emotion, intensity, quick_feedback")
+              .eq("user_id", scopedUserId)
+              .eq("generation_mode", "single")
+              .is("deleted_at", null)
+              .overrideTypes<DbArchiveInsightSingleRow[]>(),
+            supabaseAdmin
+              .from("generation_series")
+              .select("id, emotion, intensity")
+              .eq("user_id", scopedUserId)
+              .is("deleted_at", null)
+              .overrideTypes<DbArchiveInsightSeriesRow[]>(),
+            supabaseAdmin
+              .from("generation_series_items")
+              .select("series_id, quick_feedback")
+              .eq("user_id", scopedUserId)
+              .is("deleted_at", null)
+              .overrideTypes<DbArchiveInsightSeriesItemRow[]>(),
+          ]);
+
+        if (singleError) throw singleError;
+        if (seriesError) throw seriesError;
+        if (seriesItemError) throw seriesItemError;
+
+        const itemsBySeries = new Map<string, Array<{ quickFeedback?: QuickFeedback }>>();
+        for (const row of seriesItemRows) {
+          const current = itemsBySeries.get(row.series_id) ?? [];
+          current.push({ quickFeedback: row.quick_feedback });
+          itemsBySeries.set(row.series_id, current);
+        }
+
+        const singles: ArchiveInsightSingleInput[] = singleRows.map((row) => ({
+          emotion: row.emotion,
+          intensity: row.intensity,
+          quickFeedback: row.quick_feedback,
+        }));
+        const series: ArchiveInsightSeriesInput[] = seriesRows.map((row) => ({
+          emotion: row.emotion,
+          intensity: row.intensity,
+          items: itemsBySeries.get(row.id) ?? [],
+        }));
+
+        return {
+          entries: [],
+          insights: buildArchiveInsights(singles, series),
+        } satisfies ArchiveOverview;
+      })();
+
+  archiveOverviewCache.set(cacheKey, {
+    value: overview,
+    expiresAt: Date.now() + ARCHIVE_OVERVIEW_TTL_MS,
+  });
+  trimCache(archiveOverviewCache, 40);
+
+  return overview;
 }
 
 export async function listHotGenerationMemories(userId?: string): Promise<HotGenerationMemory[]> {
@@ -1322,12 +1480,12 @@ export async function getCreditSummary(userId?: string): Promise<CreditSummary> 
 }
 
 export async function getUserProfile(user: User, userId?: string): Promise<UserProfileSettings> {
-  const scopedUserId = await resolveScopedUserId(userId ?? user.id);
+  const scopedUserId = userId ?? user.id;
   const row = await requireProfileRow(scopedUserId);
 
   return {
     id: row.id,
-    email: row.email,
+    email: row.email || user.email || `${scopedUserId}@users.emoswitch.local`,
     displayName: row.display_name ?? getUserDisplayName(user) ?? "Googleユーザー",
     avatarUrl:
       typeof user.user_metadata?.avatar_url === "string" && user.user_metadata.avatar_url !== ""

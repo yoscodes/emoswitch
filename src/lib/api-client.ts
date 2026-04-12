@@ -4,6 +4,7 @@ import { listGenerations } from "@/lib/generation-storage";
 import { loadGhostSettings } from "@/lib/ghost-storage";
 import { supabase } from "@/lib/supabase/client";
 import type {
+  ArchiveInsights,
   ArchiveOverview,
   CreditSummary,
   GenerationRecord,
@@ -18,6 +19,71 @@ const STORAGE_MIGRATION_FLAG = "emoswitch_supabase_migrated_v1";
 export const DATA_SYNC_EVENT = "emoswitch:data-sync";
 
 let bootstrapPromise: Promise<void> | null = null;
+
+type CachedResource<T> = {
+  value: T | null;
+  expiresAt: number;
+  promise: Promise<T> | null;
+};
+
+function createCachedResource<T>(): CachedResource<T> {
+  return {
+    value: null,
+    expiresAt: 0,
+    promise: null,
+  };
+}
+
+function readCachedResource<T>(resource: CachedResource<T>, ttlMs: number): T | null {
+  if (ttlMs <= 0) return null;
+  if (resource.value == null) return null;
+  if (Date.now() >= resource.expiresAt) return null;
+  return resource.value;
+}
+
+async function loadCachedResource<T>(
+  resource: CachedResource<T>,
+  ttlMs: number,
+  loader: () => Promise<T>,
+): Promise<T> {
+  const cached = readCachedResource(resource, ttlMs);
+  if (cached != null) {
+    return cached;
+  }
+
+  if (resource.promise) {
+    return resource.promise;
+  }
+
+  resource.promise = loader()
+    .then((value) => {
+      resource.value = value;
+      resource.expiresAt = Date.now() + ttlMs;
+      return value;
+    })
+    .finally(() => {
+      resource.promise = null;
+    });
+
+  return resource.promise;
+}
+
+function invalidateCachedResource<T>(resource: CachedResource<T>): void {
+  resource.value = null;
+  resource.expiresAt = 0;
+}
+
+const archiveOverviewResource = createCachedResource<ArchiveOverview>();
+const archiveInsightsResource = createCachedResource<ArchiveInsights>();
+const ghostSettingsResource = createCachedResource<GhostSettings>();
+const userProfileResource = createCachedResource<UserProfileSettings>();
+const creditSummaryResource = createCachedResource<CreditSummary>();
+const hypothesisCanvasResourceByKey = new Map<string, CachedResource<HypothesisCanvasResponse>>();
+
+const ARCHIVE_OVERVIEW_TTL_MS = 30_000;
+const GHOST_SETTINGS_TTL_MS = 30_000;
+const USER_PROFILE_TTL_MS = 60_000;
+const HYPOTHESIS_CANVAS_TTL_MS = 20_000;
 
 async function getAccessToken(): Promise<string | null> {
   const {
@@ -78,6 +144,7 @@ export type GenerateSeriesItem = {
   slotLabel: string;
   body: string;
   hashtags: string[];
+  validationMetric?: string;
 };
 
 export type GenerateSeriesResponse = {
@@ -90,6 +157,26 @@ export type GenerateSeriesResponse = {
 
 export type GenerateTripleResponse = GenerateSingleResponse | GenerateSeriesResponse;
 
+export type HypothesisCanvasPayload = {
+  draft: string;
+  refinementAnswer?: string;
+  generationMode: "single" | "series";
+  emotion: "empathy" | "toxic" | "mood" | "useful" | "minimal";
+  intensity: number;
+  personaKeywords?: string[];
+  personaSummary?: string;
+  strategyLabel?: string;
+};
+
+export type HypothesisCanvasResponse = {
+  summary: string;
+  previewTitle: string;
+  question: string;
+  dnaAlignment: number;
+  dnaReason: string;
+  warning: string | null;
+};
+
 export type SaveSinglePayload = Omit<GenerationRecord, "id" | "createdAt">;
 export type SaveSeriesPayload = Omit<GenerationSeriesRecord, "id" | "createdAt" | "items" | "generationMode"> & {
   generationMode: "series";
@@ -97,6 +184,11 @@ export type SaveSeriesPayload = Omit<GenerationSeriesRecord, "id" | "createdAt" 
 };
 
 export function notifyDataSync(): void {
+  invalidateCachedResource(archiveOverviewResource);
+  invalidateCachedResource(archiveInsightsResource);
+  invalidateCachedResource(creditSummaryResource);
+  invalidateCachedResource(ghostSettingsResource);
+  invalidateCachedResource(userProfileResource);
   window.dispatchEvent(new Event(DATA_SYNC_EVENT));
 }
 
@@ -151,7 +243,17 @@ export async function fetchGenerations(): Promise<GenerationRecord[]> {
 
 export async function fetchArchiveOverview(): Promise<ArchiveOverview> {
   await ensureDemoWorkspace();
-  return requestJson<ArchiveOverview>("/api/archive/insights");
+  return loadCachedResource(archiveOverviewResource, ARCHIVE_OVERVIEW_TTL_MS, () =>
+    requestJson<ArchiveOverview>("/api/archive/insights"),
+  );
+}
+
+export async function fetchArchiveInsights(): Promise<ArchiveInsights> {
+  await ensureDemoWorkspace();
+  return loadCachedResource(archiveInsightsResource, ARCHIVE_OVERVIEW_TTL_MS, async () => {
+    const data = await requestJson<Pick<ArchiveOverview, "insights">>("/api/archive/insights?summaryOnly=1");
+    return data.insights;
+  });
 }
 
 export async function generateTriple(payload: GenerateTriplePayload): Promise<GenerateTripleResponse> {
@@ -160,6 +262,31 @@ export async function generateTriple(payload: GenerateTriplePayload): Promise<Ge
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function analyzeHypothesisCanvas(payload: HypothesisCanvasPayload): Promise<HypothesisCanvasResponse> {
+  await ensureDemoWorkspace();
+  const cacheKey = JSON.stringify({
+    ...payload,
+    draft: payload.draft.trim(),
+    refinementAnswer: payload.refinementAnswer?.trim() ?? "",
+    personaSummary: payload.personaSummary?.trim() ?? "",
+    strategyLabel: payload.strategyLabel?.trim() ?? "",
+  });
+  if (hypothesisCanvasResourceByKey.size > 30) {
+    hypothesisCanvasResourceByKey.clear();
+  }
+  const resource =
+    hypothesisCanvasResourceByKey.get(cacheKey) ?? createCachedResource<HypothesisCanvasResponse>();
+
+  hypothesisCanvasResourceByKey.set(cacheKey, resource);
+
+  return loadCachedResource(resource, HYPOTHESIS_CANVAS_TTL_MS, () =>
+    requestJson<HypothesisCanvasResponse>("/api/hypothesis-canvas", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  );
 }
 
 export async function saveGenerationRecord(
@@ -230,8 +357,10 @@ export async function removeSeriesRecord(id: string): Promise<void> {
 
 export async function fetchGhostSettings(): Promise<GhostSettings> {
   await ensureDemoWorkspace();
-  const data = await requestJson<{ settings: GhostSettings }>("/api/ghost-settings");
-  return data.settings;
+  return loadCachedResource(ghostSettingsResource, GHOST_SETTINGS_TTL_MS, async () => {
+    const data = await requestJson<{ settings: GhostSettings }>("/api/ghost-settings");
+    return data.settings;
+  });
 }
 
 export async function updateGhostSettings(settings: Partial<GhostSettings>): Promise<GhostSettings> {
@@ -240,6 +369,8 @@ export async function updateGhostSettings(settings: Partial<GhostSettings>): Pro
     method: "PUT",
     body: JSON.stringify(settings),
   });
+  ghostSettingsResource.value = data.settings;
+  ghostSettingsResource.expiresAt = Date.now() + GHOST_SETTINGS_TTL_MS;
   notifyDataSync();
   return data.settings;
 }
@@ -256,13 +387,17 @@ export async function analyzePersona(): Promise<GhostSettings> {
 
 export async function fetchCreditSummary(): Promise<CreditSummary> {
   await ensureDemoWorkspace();
-  const data = await requestJson<{ summary: CreditSummary }>("/api/credits");
-  return data.summary;
+  return loadCachedResource(creditSummaryResource, 0, async () => {
+    const data = await requestJson<{ summary: CreditSummary }>("/api/credits");
+    return data.summary;
+  });
 }
 
 export async function fetchUserProfile(): Promise<UserProfileSettings> {
-  const data = await requestJson<{ profile: UserProfileSettings }>("/api/profile");
-  return data.profile;
+  return loadCachedResource(userProfileResource, USER_PROFILE_TTL_MS, async () => {
+    const data = await requestJson<{ profile: UserProfileSettings }>("/api/profile");
+    return data.profile;
+  });
 }
 
 export async function saveUserProfile(
@@ -272,6 +407,8 @@ export async function saveUserProfile(
     method: "PUT",
     body: JSON.stringify(payload),
   });
+  userProfileResource.value = data.profile;
+  userProfileResource.expiresAt = Date.now() + USER_PROFILE_TTL_MS;
   notifyDataSync();
   return data.profile;
 }

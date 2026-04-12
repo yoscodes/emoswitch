@@ -1,22 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, Check, ChevronDown, Copy, Fingerprint, Heart, Lightbulb, Palette, Sparkles, Swords } from "lucide-react";
+import { BookOpen, Check, Fingerprint, Flame, Heart, Swords } from "lucide-react";
 
-import { EmotionDial } from "@/components/emotion-dial";
 import { GenerationSkeleton } from "@/components/generation-skeleton";
-import { PhysicalGenerateLever } from "@/components/physical-generate-lever";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ensureDemoWorkspace,
-  fetchArchiveOverview,
+  fetchArchiveInsights,
+  analyzeHypothesisCanvas,
   fetchCreditSummary,
   fetchGhostSettings,
   fetchUserProfile,
@@ -34,63 +32,8 @@ import { SERIES_SLOT_CONFIG } from "@/lib/series";
 import { playSwitchClick } from "@/lib/switch-sound";
 import { cn } from "@/lib/utils";
 
-const toneOptions = [
-  { id: "empathy" as const, icon: <Heart className="size-5" /> },
-  { id: "toxic" as const, icon: <Swords className="size-5" /> },
-  { id: "mood" as const, icon: <Palette className="size-5" /> },
-  { id: "useful" as const, icon: <BookOpen className="size-5" /> },
-  { id: "minimal" as const, icon: <Sparkles className="size-5" /> },
-];
-
-const SEED_QUESTIONS = [
-  "誰の、どんな見過ごされた痛みを解きたい？",
-  "その課題に怒りや違和感を覚える理由は？",
-  "なぜ今の自分がこのテーマをやる価値がある？",
-];
-
-const SEED_TEMPLATES = [
-  {
-    label: "原体験から始める",
-    template:
-      "自分が何度も困ったのは「〇〇」。この痛みはまだ十分に言語化されていない。まずはこの違和感を市場にぶつけたい。",
-  },
-  {
-    label: "顧客観察から始める",
-    template:
-      "最近よく見るのは「〇〇」で困っている人。彼らは既存の解決策に納得していない。このズレから事業の種を探したい。",
-  },
-  {
-    label: "思想から始める",
-    template:
-      "自分が信じているのは「〇〇」。この価値観に沿ったプロダクトや支援の形を、発信を通して市場に問いかけたい。",
-  },
-  {
-    label: "検証案から始める",
-    template:
-      "まず試したい仮説は「〇〇」。完璧なプロダクトではなく、今の時点で反応を取りにいくための見せ方を整理したい。",
-  },
-];
-
-const INTENSITY_BANDS = [
-  {
-    id: "whisper",
-    label: "観察",
-    description: "静かに仮説を置き、反応を観察する温度。",
-    anchor: 10,
-  },
-  {
-    id: "conversation",
-    label: "対話",
-    description: "読者と一緒に問いを深める標準温度。",
-    anchor: 50,
-  },
-  {
-    id: "declaration",
-    label: "宣言",
-    description: "思想や勝負仮説を強く打ち出す温度。",
-    anchor: 90,
-  },
-] as const;
+const CANVAS_PLACEHOLDER =
+  "誰の、どんな痛みを、なぜあなたが解くのか。\n違和感、原体験、怒り、試したい仮説をそのまま置いてください。";
 
 const ENERGY_RGB_BY_EMOTION: Record<EmotionTone, string> = {
   empathy: "236, 72, 153",
@@ -101,7 +44,7 @@ const ENERGY_RGB_BY_EMOTION: Record<EmotionTone, string> = {
 };
 
 type StrategyGoal = "awareness" | "education" | "engagement";
-type StrategyTemplateId = "ai-recommend" | "pain-signal" | "authority-proof" | "validation" | "movement";
+type StrategyTemplateId = "validation" | "pain-signal" | "authority-proof";
 
 type ArchiveRecommendation = {
   summary: string;
@@ -116,66 +59,32 @@ const STRATEGY_TEMPLATES: Array<{
   emotion: EmotionTone;
   intensity: number;
   strategyGoal: StrategyGoal;
-  featured?: boolean;
 }> = [
   {
+    id: "validation",
+    label: "共感を武器にする検証",
+    summary: "共感から入り、同じ痛みを持つ人の反応を確かめる",
+    emotion: "empathy",
+    intensity: 50,
+    strategyGoal: "engagement",
+  },
+  {
     id: "pain-signal",
-    label: "課題突破",
-    summary: "見過ごされた痛みを強く言語化して共感を集める",
+    label: "課題を武器にする検証",
+    summary: "課題の強さを前面に出し、市場の違和感をあぶり出す",
     emotion: "toxic",
     intensity: 90,
     strategyGoal: "awareness",
   },
   {
     id: "authority-proof",
-    label: "なぜ自分か",
-    summary: "知見・経験・実例で納得感をつくる",
+    label: "論理を武器にする検証",
+    summary: "論点を整理し、筋の良さで納得と反応を取る",
     emotion: "useful",
     intensity: 55,
     strategyGoal: "education",
   },
-  {
-    id: "validation",
-    label: "仮説検証",
-    summary: "問いかけと募集で市場の反応を取りにいく",
-    emotion: "empathy",
-    intensity: 50,
-    strategyGoal: "engagement",
-  },
-  {
-    id: "movement",
-    label: "ビジョン提示",
-    summary: "思想や未来像を語って共鳴する人を引き寄せる",
-    emotion: "mood",
-    intensity: 45,
-    strategyGoal: "engagement",
-  },
 ];
-
-function aiRecommendationTemplatePlaceholder(
-  loading: boolean,
-  template: {
-    id: StrategyTemplateId;
-    label: string;
-    summary: string;
-    emotion: EmotionTone;
-    intensity: number;
-    strategyGoal: StrategyGoal;
-    featured?: boolean;
-  } | null,
-) {
-  if (template) return template;
-
-  return {
-    id: "ai-recommend" as const,
-    label: loading ? "AI学習中" : "AI推奨待ち",
-    summary: loading ? "Archive から黄金律を解析しています" : "反応ログが溜まると、ここに黄金律が表示されます",
-    emotion: "useful" as const,
-    intensity: 50,
-    strategyGoal: "education" as const,
-    featured: true,
-  };
-}
 
 const GOAL_LABELS: Record<StrategyGoal, string> = {
   awareness: "共感",
@@ -215,14 +124,50 @@ function buildSeriesRoadmap(templateLabel: string, emotionLabel: string) {
   ];
 }
 
-function getIntensityBand(intensity: number) {
-  return INTENSITY_BANDS.reduce((closest, band) =>
-    Math.abs(intensity - band.anchor) < Math.abs(intensity - closest.anchor) ? band : closest,
-  );
-}
+const STRATEGY_TILE_META: Record<StrategyTemplateId, { icon: React.ReactElement }> = {
+  validation: {
+    icon: <Heart className="size-4" />,
+  },
+  "pain-signal": {
+    icon: <Swords className="size-4" />,
+  },
+  "authority-proof": {
+    icon: <BookOpen className="size-4" />,
+  },
+};
+
+const SPRINT_PHASE_STYLES = [
+  {
+    tone: "bg-rose-500/10 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200",
+    border: "border-rose-200/80 dark:border-rose-800/60",
+    bar: "bg-rose-400/80 dark:bg-rose-400/70",
+    glow: "bg-rose-500/10 dark:bg-rose-500/15",
+  },
+  {
+    tone: "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200",
+    border: "border-amber-200/80 dark:border-amber-800/60",
+    bar: "bg-amber-400/85 dark:bg-amber-400/70",
+    glow: "bg-amber-500/10 dark:bg-amber-500/15",
+  },
+  {
+    tone: "bg-violet-500/10 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200",
+    border: "border-violet-200/80 dark:border-violet-800/60",
+    bar: "bg-violet-400/85 dark:bg-violet-400/70",
+    glow: "bg-violet-500/10 dark:bg-violet-500/15",
+  },
+] as const;
+
+const LIGHTWEIGHT_PREVIEW_TONE: EmotionTone = "empathy";
+const LIGHTWEIGHT_PREVIEW_INTENSITY = 50;
 
 function clampEnergy(value: number) {
   return Math.min(Math.max(value, 0), 1);
+}
+
+function getIntensityFireCount(intensity: number) {
+  if (intensity >= 80) return 3;
+  if (intensity >= 55) return 2;
+  return 1;
 }
 
 function buildOpportunitySeed(params: {
@@ -236,7 +181,7 @@ function buildOpportunitySeed(params: {
     params.draft.trim() ? `事業の種:\n${params.draft.trim()}` : null,
     params.audience.trim() ? `誰の課題か:\n${params.audience.trim()}` : null,
     params.pain.trim() ? `どんな痛みか:\n${params.pain.trim()}` : null,
-    params.whyMe.trim() ? `なぜ自分がやる意味があるか:\n${params.whyMe.trim()}` : null,
+    params.whyMe.trim() ? `AIへの追加回答:\n${params.whyMe.trim()}` : null,
     params.firstExperiment.trim() ? `まず何を試すか:\n${params.firstExperiment.trim()}` : null,
   ].filter(Boolean);
 
@@ -249,11 +194,10 @@ type SeriesResult = GenerateSeriesResponse;
 export function CreateWorkspace() {
   const router = useRouter();
   const hasAppliedInitialOverridesRef = useRef(false);
+  const canvasRequestIdRef = useRef(0);
+  const lastAnalyzedCanvasKeyRef = useRef("");
   const [draft, setDraft] = useState("");
-  const [audience, setAudience] = useState("");
-  const [pain, setPain] = useState("");
-  const [whyMe, setWhyMe] = useState("");
-  const [firstExperiment, setFirstExperiment] = useState("");
+  const [refinementAnswer, setRefinementAnswer] = useState("");
   const [generationMode, setGenerationMode] = useState<"single" | "series">("single");
   const [strategyGoal, setStrategyGoal] = useState<StrategyGoal>("awareness");
   const [emotion, setEmotion] = useState<EmotionTone>("empathy");
@@ -272,58 +216,199 @@ export function CreateWorkspace() {
   const [memoryTags, setMemoryTags] = useState<string[]>([]);
   const [resultMode, setResultMode] = useState<"single" | "series">("single");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [archiveRecommendation, setArchiveRecommendation] = useState<ArchiveRecommendation | null>(null);
-  const [archiveRecommendationLoading, setArchiveRecommendationLoading] = useState(true);
-  const [inspirationOpen, setInspirationOpen] = useState(false);
-  const [helperFieldsOpen, setHelperFieldsOpen] = useState(false);
   const [personaBadgeOpen, setPersonaBadgeOpen] = useState(false);
   const [personaKeywords, setPersonaKeywords] = useState<string[]>([]);
   const [personaSummary, setPersonaSummary] = useState("");
   const [personaStatus, setPersonaStatus] = useState<"empty" | "draft" | "approved">("empty");
   const [activeTemplateId, setActiveTemplateId] = useState<StrategyTemplateId | null>(null);
+  const [canvasSummary, setCanvasSummary] = useState("");
+  const [canvasPreviewTitle, setCanvasPreviewTitle] = useState("");
+  const [canvasQuestion, setCanvasQuestion] = useState("");
+  const [canvasDnaAlignment, setCanvasDnaAlignment] = useState<number | null>(null);
+  const [canvasDnaReason, setCanvasDnaReason] = useState("");
+  const [canvasWarning, setCanvasWarning] = useState<string | null>(null);
+  const [canvasLoading, setCanvasLoading] = useState(false);
+  const deferredDraft = useDeferredValue(draft);
+  const deferredRefinementAnswer = useDeferredValue(refinementAnswer);
 
   const chameleon = CHAMELEON[emotion];
   const energyLevel = clampEnergy(intensity / 100);
-  const intensityBand = getIntensityBand(intensity);
   const energyGlow = ENERGY_RGB_BY_EMOTION[emotion];
-  const speedMode = generationMode === "series" ? "pro" : "flash";
   const currentGoalLabel = GOAL_LABELS[strategyGoal];
+  const isSprintMode = generationMode === "series";
+  const trimmedDraft = draft.trim();
+  const hasRefinementAnswer = refinementAnswer.trim().length > 0;
+  const deferredTrimmedDraft = deferredDraft.trim();
   const storedSeed = useMemo(
-    () => buildOpportunitySeed({ draft, audience, pain, whyMe, firstExperiment }),
-    [audience, draft, firstExperiment, pain, whyMe],
+    () =>
+      buildOpportunitySeed({
+        draft,
+        audience: "",
+        pain: "",
+        whyMe: refinementAnswer,
+        firstExperiment: "",
+      }),
+    [draft, refinementAnswer],
   );
-  const hasStartedSeed = draft.trim().length > 0;
-  const hasHelperInput = [audience, pain, whyMe, firstExperiment].some((item) => item.trim().length > 0);
-  const inputCompletionCount = [draft, audience, pain, whyMe, firstExperiment].filter((item) => item.trim()).length;
-  const helperCompletedCount = [audience, pain, whyMe, firstExperiment].filter((item) => item.trim()).length;
-  const helperCompleted = helperCompletedCount === 4;
-  const templateCards = archiveRecommendation?.emotion != null && archiveRecommendation.intensity != null
-    ? [
-        {
-          id: "ai-recommend" as const,
-          label: "AI推奨",
-          summary: archiveRecommendation.summary,
-          emotion: archiveRecommendation.emotion,
-          intensity: archiveRecommendation.intensity,
-          strategyGoal: inferGoalFromEmotion(archiveRecommendation.emotion),
-          featured: true,
-        },
-        ...STRATEGY_TEMPLATES,
-      ]
-    : STRATEGY_TEMPLATES;
-  const strategyTiles = [
-    aiRecommendationTemplatePlaceholder(archiveRecommendationLoading, templateCards.find((template) => template.featured) ?? null),
-    ...STRATEGY_TEMPLATES,
-  ];
-  const aiRecommendationTemplate = templateCards.find((template) => template.featured) ?? null;
-  const activeTemplate = templateCards.find((template) => template.id === activeTemplateId) ?? null;
+  const deferredCanvasKey = useMemo(
+    () =>
+      JSON.stringify({
+        draft: deferredDraft.trim().replace(/\s+/g, " "),
+        refinementAnswer: deferredRefinementAnswer.trim().replace(/\s+/g, " "),
+        generationMode,
+        personaKeywords,
+        personaSummary: personaSummary.trim().replace(/\s+/g, " "),
+      }),
+    [deferredDraft, deferredRefinementAnswer, generationMode, personaKeywords, personaSummary],
+  );
+  const inputCompletionCount = [draft, refinementAnswer].filter((item) => item.trim()).length;
+  const strategyMatrixTiles = STRATEGY_TEMPLATES;
+  const activeTemplate = STRATEGY_TEMPLATES.find((template) => template.id === activeTemplateId) ?? null;
+  const canChooseSprint = Boolean(canvasSummary) && trimmedDraft.length > 0 && (canvasQuestion === "" || hasRefinementAnswer);
+  const canvasAnalysisDelayMs = hasRefinementAnswer ? 650 : 1600;
+  const summaryCardCopy = useMemo(() => {
+    if (canvasSummary) {
+      return {
+        label: canvasLoading ? (hasRefinementAnswer ? "返答を反映中" : "更新中") : hasRefinementAnswer ? "AIリフレーム" : "AIパンチライン",
+        text: canvasSummary,
+        hint: hasRefinementAnswer
+          ? "逆質問への返答を踏まえて、いま検証すべき仮説へ再圧縮しています。"
+          : "左カラムの入力をもとに、いま検証すべき仮説へ圧縮しました。",
+      };
+    }
+    if (hasRefinementAnswer && trimmedDraft.length > 0) {
+      const firstLine = trimmedDraft.replace(/\s+/g, " ").slice(0, 54);
+      return {
+        label: canvasLoading ? "壁打ち中" : "再解釈待ち",
+        text: `「${firstLine}${trimmedDraft.length > 54 ? "..." : ""}」を、返答込みで1行仮説に組み直しています`,
+        hint: "一言の返答でも、中央カラムがあなたの意図に合わせて研ぎ直されます。",
+      };
+    }
+    if (trimmedDraft.length >= 12) {
+      const firstLine = trimmedDraft.replace(/\s+/g, " ").slice(0, 54);
+      return {
+        label: canvasLoading ? "AI圧縮中" : "ドラフト要約",
+        text: `「${firstLine}${trimmedDraft.length > 54 ? "..." : ""}」を1行仮説に変換しています`,
+        hint: "入力直後から、中央カラムが具体化されるように待機表示を出します。",
+      };
+    }
+    return {
+      label: "入力待ち",
+      text: "左で事業の種を書き始めると、ここに1行の仮説がリアルタイム表示されます。",
+      hint: "例: 創業者の孤独に寄り添い、AIでメンタルヘルスをケアするアプリ",
+    };
+  }, [canvasLoading, canvasSummary, hasRefinementAnswer, trimmedDraft]);
+  const previewCandidates = useMemo(() => {
+    const baseTitle =
+      canvasPreviewTitle ||
+      (trimmedDraft.length > 0 ? `${trimmedDraft.replace(/\s+/g, " ").slice(0, 28)}${trimmedDraft.length > 28 ? "..." : ""}` : "ここに仮説のタイトル断片が出ます");
+    const templateLabel = activeTemplate?.label ?? STRATEGY_TEMPLATES[0].label;
+    const goalLabel = GOAL_LABELS[activeTemplate?.strategyGoal ?? strategyGoal];
+
+    return [
+      {
+        focus: `${goalLabel}入口`,
+        title: baseTitle,
+        note: `${templateLabel}で最初の共感を取る案`,
+      },
+      {
+        focus: "論点の切り出し",
+        title: `${baseTitle}${baseTitle ? " を" : ""}どう市場にぶつけるか`,
+        note: "単発検証として筋の良さを見せる案",
+      },
+      {
+        focus: "検証の呼びかけ",
+        title: `${baseTitle}${baseTitle ? " を試したい人へ" : " 一緒に試す人へ"}`,
+        note: "反応や参加を取りにいく案",
+      },
+    ];
+  }, [activeTemplate?.label, activeTemplate?.strategyGoal, canvasPreviewTitle, strategyGoal, trimmedDraft]);
+  const selectedPreview = previewCandidates[selectedPreviewIndex] ?? previewCandidates[0];
   const seriesRoadmap = buildSeriesRoadmap(activeTemplate?.label ?? currentGoalLabel, EMOTION_LABELS[emotion]);
-  const leverTitle = loading ? "生成中…" : generationMode === "series" ? "30日ロードマップを生成" : "市場テスト案を生成";
-  const leverSubtitle =
+  const activeStrategyDetail = activeTemplate ?? strategyMatrixTiles[0] ?? null;
+  const activeStrategyInsight =
+    archiveRecommendation?.summary ??
+    activeStrategyDetail?.summary ??
+    "いま選んだ切り口をもとに、最初の市場反応を取りにいく導線を整えます。";
+  const sprintTimelinePhases = useMemo(
+    () =>
+      seriesRoadmap.map((phase, index) => {
+        const slot = SERIES_SLOT_CONFIG[index];
+        const generated = seriesItems[index];
+
+        return {
+          ...phase,
+          slot,
+          body: generated?.body ?? phase.detail,
+          validationMetric: generated?.validationMetric ?? null,
+          hashtags: generated?.hashtags ?? [],
+          style: SPRINT_PHASE_STYLES[index] ?? SPRINT_PHASE_STYLES[0],
+        };
+      }),
+    [seriesItems, seriesRoadmap],
+  );
+  const sprintFlowDays = useMemo(
+    () =>
+      Array.from({ length: 30 }, (_, index) => {
+        const day = index + 1;
+        const phaseIndex = day <= 10 ? 0 : day <= 20 ? 1 : 2;
+        const positionInPhase = phaseIndex === 0 ? day : phaseIndex === 1 ? day - 10 : day - 20;
+        const height =
+          phaseIndex === 0
+            ? 24 + positionInPhase * 3
+            : phaseIndex === 1
+              ? 56 - Math.abs(5.5 - positionInPhase) * 3
+              : 34 + positionInPhase * 4;
+
+        return {
+          day,
+          phaseIndex,
+          height,
+          style: SPRINT_PHASE_STYLES[phaseIndex] ?? SPRINT_PHASE_STYLES[0],
+        };
+      }),
+    [],
+  );
+  const deployTitle =
     generationMode === "series"
-      ? `${activeTemplate?.label ?? "現在の戦略"}で、30日物語を3フェーズに分けて設計します`
-      : `${activeTemplate?.label ?? "現在の戦略"}で、発信案3本と観測ポイントをまとめて出します`;
+      ? seriesTitle || canvasSummary || "現在の仮説で検証スプリントを設計する"
+      : selectedPreview?.title || "現在の仮説で検証を開始する";
+  const deployHint =
+    generationMode === "series"
+      ? "30日間の流れと各フェーズの検証ポイントをまとめて生成します。"
+      : selectedPreview?.focus
+        ? `優先する切り口: ${selectedPreview.focus}`
+        : "見出しの断片を選ぶと、ここに反映されます。";
+  const dnaAdjustmentCopy = useMemo(() => {
+    const strongerLabel =
+      emotion === "toxic"
+        ? "らしさを鋭く前に出す"
+        : emotion === "useful"
+          ? "らしさをもう少し論理的に"
+          : "らしさをもう少し前に出す";
+    const softerLabel =
+      emotion === "toxic"
+        ? "らしさを少し穏やかにする"
+        : emotion === "useful"
+          ? "らしさに余白を残す"
+          : "らしさを少しやわらげる";
+    const intensityLabel = intensity >= 76 ? "輪郭強め" : intensity >= 48 ? "標準" : "余白あり";
+
+    return {
+      strongerLabel,
+      softerLabel,
+      intensityLabel,
+    };
+  }, [emotion, intensity]);
+  const applyTonePreset = useCallback((nextEmotion: EmotionTone, nextIntensity?: number) => {
+    setEmotion(nextEmotion);
+    if (typeof nextIntensity === "number") {
+      setIntensity(nextIntensity);
+    }
+  }, []);
 
   useEffect(() => {
     if (hasAppliedInitialOverridesRef.current) return;
@@ -332,8 +417,7 @@ export function CreateWorkspace() {
     if (fromSession) {
       hasAppliedInitialOverridesRef.current = true;
       setDraft(fromSession.draft);
-      setEmotion(fromSession.emotion);
-      setIntensity(fromSession.intensity);
+      applyTonePreset(fromSession.emotion, fromSession.intensity);
       setStrategyGoal(inferGoalFromEmotion(fromSession.emotion));
       router.replace("/home", { scroll: false });
       return;
@@ -345,7 +429,7 @@ export function CreateWorkspace() {
     const qDraft = sp.get("draft");
     let changed = false;
     if (qEmotion) {
-      setEmotion(qEmotion);
+      applyTonePreset(qEmotion);
       setStrategyGoal(inferGoalFromEmotion(qEmotion));
       changed = true;
     }
@@ -373,47 +457,31 @@ export function CreateWorkspace() {
     void ensureDemoWorkspace()
       .then(() => fetchUserProfile())
       .then((profile) => {
-        setEmotion(profile.defaultEmotion);
+        applyTonePreset(profile.defaultEmotion);
         setStrategyGoal(inferGoalFromEmotion(profile.defaultEmotion));
       })
       .catch(() => undefined);
-  }, [router]);
-
-  useEffect(() => {
-    void ensureDemoWorkspace();
-  }, []);
-
-  useEffect(() => {
-    void ensureDemoWorkspace()
-      .then(() => fetchGhostSettings())
-      .then((ghost) => {
-        setPersonaKeywords(ghost.personaKeywords);
-        setPersonaSummary(ghost.personaSummary);
-        setPersonaStatus(ghost.personaStatus);
-      })
-      .catch(() => undefined);
-  }, []);
+  }, [applyTonePreset, router]);
 
   useEffect(() => {
     let active = true;
-    setArchiveRecommendationLoading(true);
 
-    void fetchArchiveOverview()
-      .then((overview) => {
+    void ensureDemoWorkspace()
+      .then(() => Promise.all([fetchGhostSettings(), fetchArchiveInsights()]))
+      .then(([ghost, insights]) => {
         if (!active) return;
+        setPersonaKeywords(ghost.personaKeywords);
+        setPersonaSummary(ghost.personaSummary);
+        setPersonaStatus(ghost.personaStatus);
         setArchiveRecommendation({
-          summary: overview.insights.bestPatternSummary,
-          emotion: overview.insights.recommendedEmotion,
-          intensity: overview.insights.recommendedIntensity,
+          summary: insights.bestPatternSummary,
+          emotion: insights.recommendedEmotion,
+          intensity: insights.recommendedIntensity,
         });
       })
       .catch(() => {
         if (!active) return;
         setArchiveRecommendation(null);
-      })
-      .finally(() => {
-        if (!active) return;
-        setArchiveRecommendationLoading(false);
       });
 
     return () => {
@@ -422,10 +490,76 @@ export function CreateWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (hasStartedSeed || hasHelperInput) {
-      setHelperFieldsOpen(true);
+    if (!deferredTrimmedDraft) {
+      lastAnalyzedCanvasKeyRef.current = "";
+      setCanvasSummary("");
+      setCanvasPreviewTitle("");
+      setCanvasQuestion("");
+      setCanvasDnaAlignment(null);
+      setCanvasDnaReason("");
+      setCanvasWarning(null);
+      return;
     }
-  }, [hasHelperInput, hasStartedSeed]);
+
+    if (deferredTrimmedDraft.length < 24 && deferredRefinementAnswer.trim().length === 0) {
+      return;
+    }
+
+    if (lastAnalyzedCanvasKeyRef.current === deferredCanvasKey) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const requestId = canvasRequestIdRef.current + 1;
+      canvasRequestIdRef.current = requestId;
+      setCanvasLoading(true);
+      void analyzeHypothesisCanvas({
+        draft: deferredDraft,
+        refinementAnswer: deferredRefinementAnswer,
+        generationMode,
+        emotion: LIGHTWEIGHT_PREVIEW_TONE,
+        intensity: LIGHTWEIGHT_PREVIEW_INTENSITY,
+        personaKeywords,
+        personaSummary,
+        strategyLabel: "",
+      })
+        .then((canvas) => {
+          if (canvasRequestIdRef.current !== requestId) return;
+          lastAnalyzedCanvasKeyRef.current = deferredCanvasKey;
+          setCanvasSummary(canvas.summary);
+          setCanvasPreviewTitle(canvas.previewTitle);
+          setCanvasQuestion(canvas.question);
+          setCanvasDnaAlignment(canvas.dnaAlignment);
+          setCanvasDnaReason(canvas.dnaReason);
+          setCanvasWarning(canvas.warning ?? null);
+        })
+        .catch(() => {
+          if (canvasRequestIdRef.current !== requestId) return;
+          lastAnalyzedCanvasKeyRef.current = deferredCanvasKey;
+          setCanvasSummary("");
+          setCanvasPreviewTitle("");
+          setCanvasQuestion("");
+          setCanvasDnaAlignment(null);
+          setCanvasDnaReason("");
+          setCanvasWarning(null);
+        })
+        .finally(() => {
+          if (canvasRequestIdRef.current !== requestId) return;
+          setCanvasLoading(false);
+        });
+    }, canvasAnalysisDelayMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    deferredCanvasKey,
+    deferredDraft,
+    deferredRefinementAnswer,
+    deferredTrimmedDraft,
+    generationMode,
+    canvasAnalysisDelayMs,
+    personaKeywords,
+    personaSummary,
+  ]);
 
   const handleUploadAudio = async (file: File) => {
     setUploading(true);
@@ -444,8 +578,15 @@ export function CreateWorkspace() {
     }
   };
 
-  const runGenerate = useCallback(async () => {
+  const runGenerate = useCallback(async (options?: { modeOverride?: "single" | "series"; intensityOverride?: number }) => {
+    const requestedMode = options?.modeOverride ?? generationMode;
+    const requestedIntensity = options?.intensityOverride ?? intensity;
+    const requestedSpeedMode = requestedMode === "series" ? "pro" : "flash";
     if (!storedSeed.trim()) return;
+    if (canvasQuestion && !hasRefinementAnswer) {
+      setError("生成前に、AIからの逆質問に1つだけ答えてください。");
+      return;
+    }
     setError(null);
     setLoading(true);
     setVariants([]);
@@ -456,7 +597,7 @@ export function CreateWorkspace() {
     setAdviceHint(null);
     setGhostWhisper(null);
     setMemoryTags([]);
-    setResultMode(generationMode);
+    setResultMode(requestedMode);
     setSelectedIndex(null);
     setCurrentId(null);
     playSwitchClick();
@@ -470,19 +611,22 @@ export function CreateWorkspace() {
 
       const data = await generateTriple({
         draft: storedSeed,
-        generationMode,
+        generationMode: requestedMode,
         strategyGoal,
         emotion,
-        speedMode,
-        intensity,
+        speedMode: requestedSpeedMode,
+        intensity: requestedIntensity,
         ngWords: ghost.ngWords,
         stylePrompt: ghost.stylePrompt.trim(),
         personaKeywords,
         personaSummary,
-        audience,
-        pain,
-        whyMe,
-        firstExperiment,
+        whyMe: [
+          refinementAnswer.trim(),
+          requestedMode === "series" ? "検証スプリントとして30日間の流れも設計したい" : null,
+          requestedMode === "single" && selectedPreview?.focus ? `優先したい切り口: ${selectedPreview.focus}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
       });
 
       if ("seriesTitle" in data) {
@@ -498,13 +642,18 @@ export function CreateWorkspace() {
           title: seriesData.seriesTitle,
           draft: storedSeed,
           emotion,
-          intensity,
-          speedMode,
+          intensity: requestedIntensity,
+          speedMode: requestedSpeedMode,
           adviceHint: seriesData.adviceHint ?? null,
           ghostWhisper: seriesData.ghostWhisper ?? null,
           quickFeedback: null,
           memoryTags: seriesData.memoryTags ?? [],
-          items: seriesData.items,
+          items: seriesData.items.map((item) => ({
+            slotKey: item.slotKey,
+            slotLabel: item.slotLabel,
+            body: item.body,
+            hashtags: item.hashtags,
+          })),
         });
       } else {
         const singleData = data as SingleResult;
@@ -519,8 +668,8 @@ export function CreateWorkspace() {
           generationMode: "single",
           draft: storedSeed,
           emotion,
-          intensity,
-          speedMode,
+          intensity: requestedIntensity,
+          speedMode: requestedSpeedMode,
           variants: singleData.variants,
           hashtags: singleData.hashtags,
           selectedIndex: null,
@@ -541,18 +690,17 @@ export function CreateWorkspace() {
       setLoading(false);
     }
   }, [
-    audience,
+    canvasQuestion,
     emotion,
-    firstExperiment,
     generationMode,
     intensity,
-    pain,
     personaKeywords,
     personaSummary,
-    speedMode,
+    hasRefinementAnswer,
+    refinementAnswer,
+    selectedPreview?.focus,
     storedSeed,
     strategyGoal,
-    whyMe,
   ]);
 
   const selectVariant = (index: number) => {
@@ -581,20 +729,24 @@ export function CreateWorkspace() {
     await copyText(bundle);
   };
 
-  const appendToDraft = (text: string) => {
-    setDraft((prev) => (prev.trim() ? `${prev.trim()}\n\n${text}` : text));
-    setInspirationOpen(false);
-  };
-
   const applyStrategyTemplate = (templateId: StrategyTemplateId) => {
-    const template = templateCards.find((item) => item.id === templateId);
+    const template = STRATEGY_TEMPLATES.find((item) => item.id === templateId);
     if (!template) return;
     setActiveTemplateId(template.id);
     setStrategyGoal(template.strategyGoal);
-    setEmotion(template.emotion);
-    setIntensity(template.intensity);
+    applyTonePreset(template.emotion, template.intensity);
     playSwitchClick();
   };
+
+  const nudgeIntensity = async (direction: "stronger" | "softer") => {
+    const nextIntensity = Math.min(100, Math.max(0, intensity + (direction === "stronger" ? 12 : -12)));
+    if (nextIntensity === intensity) return;
+    setIntensity(nextIntensity);
+  };
+
+  useEffect(() => {
+    setSelectedPreviewIndex(0);
+  }, [canvasPreviewTitle, generationMode, activeTemplateId]);
 
   return (
     <div
@@ -640,7 +792,7 @@ export function CreateWorkspace() {
         />
       </div>
 
-      <div className="relative mx-auto flex max-w-4xl flex-col gap-6 px-4 py-6 pb-28 md:px-6">
+      <div className="relative mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-6 pb-28 md:px-6 xl:px-8 2xl:px-10">
         <header className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -711,565 +863,760 @@ export function CreateWorkspace() {
 
         <Card className="border-0 bg-card/80 shadow-xl backdrop-blur-md">
           <CardContent className="space-y-6 p-6">
-            <div className="rounded-2xl border bg-background/60 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="grid gap-4 lg:gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.45fr)_minmax(0,1.1fr)] 2xl:gap-6 2xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.48fr)_minmax(0,1.14fr)]">
+              <section className="space-y-4 rounded-3xl border bg-background/55 p-4">
                 <div className="space-y-1">
-                  <p className="text-sm font-medium">戦い方を選ぶ</p>
-                  <p className="text-xs text-muted-foreground">
-                    まずは単発で切り口を試すか、30日物語として検証を設計するかを決めます。
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">INPUT</p>
+                    <Badge variant="secondary" className="text-xs">
+                      入力 {inputCompletionCount}/2
+                    </Badge>
+                  </div>
+                  <p className="text-sm font-medium">アイデア</p>
                 </div>
-                <div className="inline-flex rounded-xl border bg-muted/30 p-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={generationMode === "single" ? "default" : "ghost"}
-                    onClick={() => setGenerationMode("single")}
-                    className="rounded-lg"
-                  >
-                    単発検証
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={generationMode === "series" ? "default" : "ghost"}
-                    onClick={() => setGenerationMode("series")}
-                    className="rounded-lg"
-                  >
-                    30日物語
-                  </Button>
-                </div>
-              </div>
-            </div>
 
-            <section className="space-y-3 rounded-3xl border bg-background/55 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="space-y-1">
-                  <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">PHASE 1 / INPUT</p>
-                  <p className="text-sm font-medium">思想の投下</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {helperCompleted ? (
-                    <Badge className="rounded-full bg-emerald-600 text-white">DNA同期完了 👻</Badge>
-                  ) : null}
-                  <Badge variant="secondary" className="text-xs">
-                    思考メモ音声OK
-                  </Badge>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 rounded-full px-2"
-                    aria-expanded={inspirationOpen}
-                    onClick={() => setInspirationOpen((open) => !open)}
-                  >
-                    <Lightbulb className="size-3.5" />
-                    <span>書き出しヒント</span>
-                  </Button>
-                </div>
-              </div>
-              <Textarea
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="いま掘りたい市場、怒りを感じる課題、作ってみたい世界観を自由に置いてください"
-                className="min-h-[180px] resize-y border-0 bg-background/90 text-base shadow-sm"
-              />
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>雑でも大丈夫です。原体験・違和感・仮説の断片だけでも生成できます。</span>
-                <span>{inputCompletionCount}/5 項目入力</span>
-              </div>
-
-              <AnimatePresence initial={false}>
-                {inspirationOpen ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: -6, height: 0 }}
-                    animate={{ opacity: 1, y: 0, height: "auto" }}
-                    exit={{ opacity: 0, y: -6, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="rounded-2xl border border-dashed bg-background/88 p-4 shadow-sm backdrop-blur-sm">
-                      <div className="space-y-3">
-                        <div className="space-y-1">
-                          <p className="text-xs font-semibold tracking-wide text-muted-foreground">迷ったらこの問いから</p>
-                          <p className="text-xs text-muted-foreground">最初の一文だけ置けば、残りは補助入力で整えられます。</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {SEED_QUESTIONS.map((question) => (
-                            <Button
-                              key={question}
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-auto rounded-full px-3 py-1.5 text-left whitespace-normal"
-                              onClick={() => appendToDraft(`${question}\n`)}
-                            >
-                              {question}
-                            </Button>
-                          ))}
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium text-muted-foreground">たたき台テンプレ</p>
-                          <div className="flex flex-wrap gap-2">
-                            {SEED_TEMPLATES.map((template) => (
-                              <Button
-                                key={template.label}
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                className="rounded-full"
-                                onClick={() => appendToDraft(template.template)}
-                              >
-                                {template.label}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
-                <span className="rounded-lg border bg-muted/50 px-2 py-1">音声をアップロード</span>
-                <input
-                  type="file"
-                  accept="audio/*"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void handleUploadAudio(file);
-                  }}
+                <Textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  placeholder={CANVAS_PLACEHOLDER}
+                  className="min-h-[260px] resize-y border-0 bg-background/90 text-base leading-7 shadow-sm"
                 />
-                {uploading ? "文字起こし中…" : "頭の中の壁打ちをテキスト化"}
-              </label>
 
-              <AnimatePresence initial={false}>
-                {hasStartedSeed || hasHelperInput ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8, height: 0 }}
-                    animate={{ opacity: 1, y: 0, height: "auto" }}
-                    exit={{ opacity: 0, y: -8, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="rounded-2xl border border-dashed bg-background/70 p-4">
-                      <button
-                        type="button"
-                        onClick={() => setHelperFieldsOpen((open) => !open)}
-                        className="flex w-full items-center justify-between gap-3 text-left"
-                        aria-expanded={helperFieldsOpen}
-                      >
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium">💡 精度を上げるヒント</p>
-                          <p className="text-xs text-muted-foreground">
-                            まだ全部埋めなくて大丈夫です。必要なところだけ深掘りすると、仮説の精度が上がります。
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border bg-background/90 px-4 py-3 text-sm shadow-sm transition-colors hover:bg-background">
+                  <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">話して入力</span>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void handleUploadAudio(file);
+                    }}
+                  />
+                  {uploading ? "文字起こし中…" : "音声で仮説を置く"}
+                </label>
+
+                <div className="rounded-2xl border bg-background/85 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">DNA同期</p>
+                      <p className="mt-1 text-sm font-medium">
+                        {canvasDnaAlignment != null ? `あなたのDNAとの一致率 ${canvasDnaAlignment}%` : "入力するとDNA同期を解析します"}
+                      </p>
+                    </div>
+                    {canvasDnaAlignment != null ? (
+                      <Badge className={cn("rounded-full", canvasDnaAlignment >= 70 ? "bg-emerald-600 text-white" : canvasDnaAlignment >= 45 ? "bg-amber-500 text-white" : "bg-rose-600 text-white")}>
+                        {canvasDnaAlignment >= 70 ? "一致" : canvasDnaAlignment >= 45 ? "再検討" : "ズレあり"}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  {canvasLoading ? (
+                    <p className="mt-2 text-xs text-muted-foreground">DNAを照合中…</p>
+                  ) : canvasDnaReason ? (
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{canvasDnaReason}</p>
+                  ) : null}
+                  {canvasWarning ? (
+                    <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200">
+                      {canvasWarning}
+                    </p>
+                  ) : null}
+                </div>
+
+                {canvasSummary ? (
+                  <div className="rounded-2xl border bg-background/85 p-4">
+                    <p className="text-xs font-semibold tracking-wide text-muted-foreground">AI要約</p>
+                    <p className="mt-2 text-sm leading-6">今回ぶつける仮説はこれですね？</p>
+                    <p className="mt-2 text-base font-medium">{canvasSummary}</p>
+                  </div>
+                ) : null}
+
+                {canvasQuestion ? (
+                  <div className="rounded-3xl border border-violet-200/80 bg-linear-to-br from-violet-50/90 via-background to-background p-4 shadow-sm dark:border-violet-800/60 dark:from-violet-950/25">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">AI WALL</p>
+                        <p className="mt-1 text-sm font-medium">AIとの短い壁打ち</p>
+                      </div>
+                      <Badge variant="secondary" className="rounded-full">
+                        {hasRefinementAnswer ? (canvasLoading ? "解釈中" : "返答あり") : "未返信"}
+                      </Badge>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      <div className="flex justify-start">
+                        <div className="max-w-[92%] rounded-[22px] rounded-tl-md border border-violet-200/80 bg-violet-500/10 px-4 py-3 dark:border-violet-800/60 dark:bg-violet-500/10">
+                          <p className="text-[11px] font-semibold tracking-wide text-violet-700 dark:text-violet-200">
+                            AIからの逆質問
+                          </p>
+                          <p className="mt-2 text-sm font-medium leading-6">{canvasQuestion}</p>
+                          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                            この一言で、中央のパンチラインがあなたの意図に寄っていきます。
                           </p>
                         </div>
-                        <ChevronDown className={cn("size-4 shrink-0 transition-transform", helperFieldsOpen && "rotate-180")} />
-                      </button>
-
-                      <AnimatePresence initial={false}>
-                        {helperFieldsOpen ? (
-                          <motion.div
-                            initial={{ opacity: 0, y: -4, height: 0 }}
-                            animate={{ opacity: 1, y: 0, height: "auto" }}
-                            exit={{ opacity: 0, y: -4, height: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="mt-4 grid gap-3 md:grid-cols-2">
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">誰の課題か</p>
-                                <Input
-                                  value={audience}
-                                  onChange={(event) => setAudience(event.target.value)}
-                                  placeholder="例: 採用広報に疲れている小規模SaaSの代表"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">どんな痛みか</p>
-                                <Input
-                                  value={pain}
-                                  onChange={(event) => setPain(event.target.value)}
-                                  placeholder="例: 施策は打つのに、刺さっている手応えがない"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">なぜ自分がやる意味があるか</p>
-                                <Input
-                                  value={whyMe}
-                                  onChange={(event) => setWhyMe(event.target.value)}
-                                  placeholder="例: 自分も同じ痛みを抱え、解決策を独自に試してきた"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">まず何を試すか</p>
-                                <Input
-                                  value={firstExperiment}
-                                  onChange={(event) => setFirstExperiment(event.target.value)}
-                                  placeholder="例: 相談募集投稿を出して、3人の壁打ちを取る"
-                                />
-                              </div>
-                            </div>
-                            <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                              <span>深掘りしたいところだけ埋めれば十分です。</span>
-                              <span>{helperCompletedCount}/4 同期済み</span>
-                            </div>
-                          </motion.div>
-                        ) : null}
-                      </AnimatePresence>
+                      </div>
+                      <div className="flex justify-end">
+                        <div className="w-full max-w-[94%] rounded-[22px] rounded-tr-md border bg-background/95 px-4 py-3 shadow-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">あなたの返答</p>
+                            <span className="text-[11px] text-muted-foreground">一言でOK</span>
+                          </div>
+                          <Textarea
+                            value={refinementAnswer}
+                            onChange={(event) => setRefinementAnswer(event.target.value)}
+                            placeholder="フォームに埋める感覚ではなく、AIに一言返すイメージで書いてください"
+                            className="mt-3 min-h-24 resize-y border-0 bg-transparent px-0 pb-0 pt-0 shadow-none focus-visible:ring-0"
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </motion.div>
+                    <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                      {canvasLoading && hasRefinementAnswer
+                        ? "返答を受けて仮説を再解釈しています。中央カラムの1行要約がまもなく更新されます。"
+                        : "ここで返した言葉が、生成前の最後のチューニングになります。"}
+                    </p>
+                  </div>
                 ) : null}
-              </AnimatePresence>
-            </section>
+              </section>
 
-            <section className="space-y-3 rounded-3xl border bg-background/55 p-4">
-              <div className="space-y-1">
-                <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">PHASE 2 / STRATEGY</p>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium">戦略の選択</p>
-                  {activeTemplate ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      適用中: {activeTemplate.label}
-                    </Badge>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">AI推奨か、今回ぶつけたい仮説の型を選びます</span>
-                  )}
-                </div>
-              </div>
-              <div className="grid gap-2 md:grid-cols-3">
-                {strategyTiles.map((template, index) => {
-                  const active = template.id === activeTemplateId;
-                  const isAiTile = index === 0;
-                  const isDisabledAi = isAiTile && aiRecommendationTemplate == null;
-                  return (
-                    <button
-                      key={template.id}
-                      type="button"
-                      disabled={isDisabledAi}
-                      onClick={() => applyStrategyTemplate(template.id)}
-                      className={cn(
-                        "rounded-xl border bg-background/88 px-3 py-3 text-left transition-all hover:bg-background disabled:cursor-not-allowed disabled:opacity-75",
-                        isAiTile && "border-amber-300/80 bg-amber-50/60 dark:border-amber-800/60 dark:bg-amber-950/20",
-                        active && cn("border-foreground/30 bg-background shadow-sm ring-2 ring-offset-2", chameleon.ring),
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-semibold">
-                          {isAiTile ? "🔥 AI推奨（あなたの黄金律）" : template.label}
-                        </p>
-                        <Badge variant="outline" className="rounded-full px-2 py-0 text-[10px]">
-                          {GOAL_LABELS[template.strategyGoal]}
-                        </Badge>
-                      </div>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {EMOTION_LABELS[template.emotion]} / {getIntensityBand(template.intensity).label}
-                      </p>
-                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{template.summary}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="space-y-4 rounded-3xl border bg-background/55 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">PHASE 3 / TONE</p>
-                  <p className="text-sm font-medium">市場へのチューニング</p>
-                  <p className="text-xs text-muted-foreground">
-                    見せ方と強度をひとつの操作盤として整えます。ここを触ると、レバーの空気も変わります。
-                  </p>
-                </div>
-                <Link href="/persona">
-                  <Button type="button" variant="outline" size="sm">
-                    ペルソナを更新
-                  </Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="rounded-2xl border bg-background/80 p-4">
-                  <p className="mb-3 text-sm font-medium">見せ方</p>
-                  <EmotionDial
-                    options={toneOptions}
-                    value={emotion}
-                    onChange={setEmotion}
-                    accentRing={chameleon.ring}
-                  />
-                </div>
-
-                <div className="rounded-2xl border bg-background/80 p-4">
-                  <div className="flex items-start justify-between gap-3 text-sm">
-                    <div className="space-y-1">
-                      <p className="font-medium">強度</p>
-                      <p className="text-xs text-muted-foreground">観察・対話・宣言のどこで市場に出すかを決めます。</p>
-                    </div>
-                    <div className="text-right">
-                      <p className={cn("text-lg font-semibold", chameleon.accentFg)}>{intensityBand.label}</p>
-                      <p className="text-xs font-medium text-foreground">{intensity}%</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-2">
-                    {INTENSITY_BANDS.map((band) => {
-                      const active = band.id === intensityBand.id;
-                      return (
-                        <button
-                          key={band.id}
-                          type="button"
-                          onClick={() => setIntensity(band.anchor)}
-                          className={cn(
-                            "rounded-xl border bg-background/80 px-4 py-3 text-left transition-all hover:bg-background",
-                            active && cn("border-foreground/30 bg-background shadow-sm ring-2 ring-offset-2", chameleon.ring),
-                          )}
-                        >
-                          <p className="text-sm font-semibold">{band.label}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{band.description}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {generationMode === "series" ? (
-              <div className="rounded-2xl border bg-background/60 p-4">
-                <AnimatePresence initial={false}>
-                  <motion.div
-                    initial={{ opacity: 0, height: 0, y: 8 }}
-                    animate={{ opacity: 1, height: "auto", y: 0 }}
-                    exit={{ opacity: 0, height: 0, y: -8 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="space-y-3 rounded-2xl border border-dashed bg-muted/20 p-3">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        30回投稿する作業ではなく、1ヶ月で市場から学ぶ物語として設計します。
-                      </p>
-                      <div className="grid gap-3 md:grid-cols-3">
-                        {seriesRoadmap.map((phase) => (
-                          <div key={phase.rangeLabel} className="rounded-xl border bg-background/85 p-4 text-left shadow-sm">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-semibold text-muted-foreground">{phase.rangeLabel}</p>
-                              <Badge variant="outline" className="rounded-full text-[11px]">
-                                {phase.focus}
-                              </Badge>
-                            </div>
-                            <p className="mt-3 text-xl font-bold tracking-tight">{phase.goal}</p>
-                            <p className="mt-2 text-sm font-medium">{phase.objective}</p>
-                            <p className="mt-2 text-xs leading-5 text-muted-foreground">{phase.detail}</p>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        {SERIES_SLOT_CONFIG.map((slot) => (
-                          <div key={slot.day} className="rounded-xl border bg-background/85 p-3 text-left shadow-sm">
-                            <p className="text-xs font-semibold text-muted-foreground">{slot.day}</p>
-                            <p className="mt-1 text-sm font-medium">{slot.title}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">{slot.subtitle}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-            ) : null}
-
-            <PhysicalGenerateLever
-              disabled={!storedSeed.trim() || uploading}
-              loading={loading}
-              onPull={runGenerate}
-              accentClass={cn(chameleon.accent, "text-white")}
-              energy={energyLevel}
-              glowColor={energyGlow}
-              title={leverTitle}
-              subtitle={leverSubtitle}
-            />
-
-            {error ? <p className="text-center text-sm text-destructive">{error}</p> : null}
-
-            <AnimatePresence mode="wait">
-              {loading ? (
-                <motion.div key="sk" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                  <GenerationSkeleton />
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-
-            {!loading &&
-            ((resultMode === "single" && variants.length === 3) || (resultMode === "series" && seriesItems.length === 3)) ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="space-y-4"
+              <section
+                className={cn(
+                  "space-y-4 rounded-3xl border p-4 transition-all duration-500 ease-out",
+                  isSprintMode
+                    ? "border-violet-300/70 bg-violet-950/[0.07] shadow-[0_24px_80px_-36px_rgba(124,58,237,0.65)] dark:border-violet-700/70 dark:bg-violet-950/25"
+                    : "bg-background/55",
+                )}
               >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm font-medium">
-                    {resultMode === "series" ? "30日間の検証ロードマップ" : "市場にぶつける発信案3本"}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary" className="rounded-full">
-                      戦略: {activeTemplate?.label ?? currentGoalLabel}
-                    </Badge>
-                    {resultMode === "series" ? (
-                      <Button type="button" size="sm" variant="outline" onClick={() => void copySeriesBundle()}>
-                        <Copy className="mr-1 size-3" />
-                        ロードマップをコピー
-                      </Button>
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">PROCESS</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">{generationMode === "series" ? "検証スプリント設計" : "戦略とチューニング"}</p>
+                    {generationMode === "series" ? (
+                      <Badge variant="secondary" className="rounded-full">
+                        検証スプリント
+                      </Badge>
+                    ) : activeTemplate ? (
+                      <Badge variant="secondary" className="rounded-full">
+                        {activeTemplate.label}
+                      </Badge>
                     ) : null}
                   </div>
                 </div>
 
-                {ghostWhisper ? (
-                  <div className="rounded-2xl border border-violet-200/70 bg-violet-50/70 p-3 text-sm text-violet-950 shadow-sm dark:border-violet-800/60 dark:bg-violet-950/30 dark:text-violet-100">
-                    <div className="flex items-start gap-3">
-                      <div className="rounded-full bg-violet-500/10 p-2 text-violet-600 dark:text-violet-300">
-                        <Fingerprint className="size-4" />
+                {isSprintMode ? (
+                  <motion.div
+                    key="strategy-mode-banner"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="rounded-2xl border border-violet-300/70 bg-linear-to-r from-violet-500/12 via-violet-500/6 to-transparent p-4 dark:border-violet-700/70"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold tracking-wide text-violet-700 dark:text-violet-200">STRATEGY MODE</p>
+                        <p className="mt-1 text-sm font-medium">30日を設計する本番モードに切り替わりました</p>
                       </div>
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-violet-700/80 dark:text-violet-300/80">
-                          ペルソナからの示唆
-                        </p>
-                        <p className="leading-relaxed">{ghostWhisper}</p>
-                      </div>
+                      <Badge className="rounded-full bg-violet-600 text-white">Professional</Badge>
                     </div>
-                  </div>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      単発の比較ではなく、共感から検証募集までの流れをひとつの戦略として組み上げます。
+                    </p>
+                  </motion.div>
                 ) : null}
 
-                {memoryTags.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {memoryTags.map((tag) => (
-                      <Badge key={tag} variant="secondary" className="rounded-full">
-                        {tag}
-                      </Badge>
-                    ))}
+                <div
+                  className={cn(
+                    "rounded-2xl border bg-background/85 p-4 transition-all duration-300",
+                    hasRefinementAnswer && "border-violet-200/80 shadow-[0_0_0_1px_rgba(139,92,246,0.10)] dark:border-violet-800/60",
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">Hypothesis Summary</p>
+                      <p className="text-sm font-medium">1行のパンチライン確認</p>
+                    </div>
+                    <Badge variant="outline" className="rounded-full text-[10px]">
+                      {summaryCardCopy.label}
+                    </Badge>
                   </div>
-                ) : null}
-
-                {resultMode === "series" ? (
-                  <div className="rounded-2xl border bg-muted/20 p-4">
-                    <p className="text-sm font-medium text-muted-foreground">30日ロードマップ名</p>
-                    <p className="mt-1 text-lg font-semibold text-foreground">{seriesTitle}</p>
-                  </div>
-                ) : null}
-
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {(resultMode === "series" ? seriesItems.map((item) => item.body) : variants).map((text, index) => {
-                    const picked = selectedIndex === index;
-                    const slot = SERIES_SLOT_CONFIG[index];
-                    const variantFocus = variantFocuses[index] ?? `仮説の切り口 ${index + 1}`;
-                    const label =
-                      resultMode === "series" && slot
-                        ? `${slot.day} | ${slot.title}（${slot.subtitle}）`
-                        : `仮説案 ${index + 1}`;
-
-                    return resultMode === "series" ? (
-                      <motion.div
-                        key={index}
-                        layout
-                        className="rounded-2xl border bg-background/90 p-4 text-left text-sm leading-relaxed shadow-sm transition-all hover:shadow-md"
-                        whileHover={{ y: -2 }}
-                      >
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <Badge variant="outline">{label}</Badge>
-                          <Badge variant="outline" className="rounded-full text-[11px]">
-                            30日フェーズ
-                          </Badge>
-                        </div>
-                        <p className="min-h-24 text-foreground">{text}</p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {(seriesItems[index]?.hashtags ?? []).map((tag) => (
-                            <Badge key={`${label}-${tag}`} variant="outline" className="rounded-full text-[11px]">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="mt-2 h-8 px-2 text-xs"
-                          onClick={() => void copyText(text)}
-                        >
-                          <Copy className="mr-1 size-3" />
-                          コピー
-                        </Button>
-                      </motion.div>
-                    ) : (
-                      <motion.button
-                        key={index}
-                        type="button"
-                        layout
-                        onClick={() => selectVariant(index)}
-                        className={cn(
-                          "rounded-2xl border-2 bg-background/90 p-4 text-left text-sm leading-relaxed shadow-sm transition-all hover:shadow-md",
-                          picked ? cn("ring-2 ring-offset-2", chameleon.ring) : "border-border",
-                        )}
-                        whileHover={{ y: -2 }}
-                        whileTap={{ scale: 0.99 }}
-                      >
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <Badge variant="outline">{label}</Badge>
-                          <div className="flex items-center gap-2">
-                            {picked ? <Check className="size-4 text-green-600" /> : null}
-                          </div>
-                        </div>
-                        <div className="mb-3">
-                          <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">今回ぶつける仮説</p>
-                          <p className="mt-1 inline-flex rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium">
-                            【{variantFocus}】重視
-                          </p>
-                        </div>
-                        <p className="min-h-24 text-foreground">{text}</p>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="mt-2 h-8 px-2 text-xs"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void copyText(text);
-                          }}
-                        >
-                          <Copy className="mr-1 size-3" />
-                          コピー
-                        </Button>
-                      </motion.button>
-                    );
-                  })}
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.p
+                      key={`${summaryCardCopy.label}-${summaryCardCopy.text}`}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.18 }}
+                      className="mt-3 text-sm font-medium leading-6"
+                    >
+                      {summaryCardCopy.text}
+                    </motion.p>
+                  </AnimatePresence>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{summaryCardCopy.hint}</p>
                 </div>
 
-                {resultMode === "single" ? (
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">検証タグ</p>
-                    <div className="flex flex-wrap gap-2">
-                      {hashtags.map((tag) => (
-                        <button
-                          key={tag}
-                          type="button"
-                          onClick={() => void copyText(tag)}
-                          className={cn(
-                            "rounded-full border bg-muted/50 px-3 py-1 text-xs font-medium transition-colors hover:bg-muted",
-                            chameleon.accentFg,
-                          )}
-                        >
-                          {tag}
-                        </button>
-                      ))}
+                {canChooseSprint ? (
+                  <div className="rounded-2xl border bg-background/85 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">検証ルート</p>
+                        <p className="text-sm font-medium">次の検証形式を選ぶ</p>
+                      </div>
+                      <Badge variant="outline" className="rounded-full text-[11px]">
+                        1行仮説の圧縮後に解放
+                      </Badge>
+                    </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setGenerationMode("single")}
+                        className={cn(
+                          "rounded-2xl border bg-background/80 p-4 text-left transition-all hover:bg-background",
+                          generationMode === "single" && cn("border-foreground/30 bg-background shadow-sm ring-2 ring-offset-2", chameleon.ring),
+                        )}
+                      >
+                        <p className="text-sm font-semibold">単発検証</p>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          いまの仮説を市場にぶつける3案を比較し、まず最初の反応を取りにいきます。
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGenerationMode("series")}
+                        className={cn(
+                          "rounded-2xl border bg-background/80 p-4 text-left transition-all hover:bg-background",
+                          generationMode === "series" && "border-violet-300 bg-violet-50/60 shadow-sm ring-2 ring-violet-200 ring-offset-2 dark:border-violet-700 dark:bg-violet-950/20 dark:ring-violet-900/60",
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold">検証スプリント</p>
+                          <Badge className="rounded-full bg-violet-600 text-white">30日</Badge>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          共感、納得、検証募集へと進む30日間の流れを一気に設計します。
+                        </p>
+                      </button>
                     </div>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="rounded-2xl border border-dashed bg-background/85 p-4">
+                    <p className="text-xs font-semibold tracking-wide text-muted-foreground">検証ルート</p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      左カラムの入力がまとまり、1行仮説に圧縮されると、ここに検証スプリントの選択肢が現れます。
+                    </p>
+                  </div>
+                )}
 
-                {adviceHint ? (
-                  <p className="rounded-xl border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground">
-                    観測ポイント: {adviceHint}
+                {generationMode === "series" ? (
+                  <div className="rounded-2xl border bg-background/85 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">スプリントタイムライン</p>
+                        <p className="text-sm font-medium">30日を3フェーズで進める</p>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">横並びのタイムライン</p>
+                    </div>
+                    <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                      {sprintTimelinePhases.map((phase, index) => (
+                        <div key={phase.rangeLabel} className={cn("rounded-2xl border bg-background/80 p-4", phase.style.border)}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">{phase.rangeLabel}</p>
+                              <p className="mt-1 text-sm font-semibold">{phase.slot?.title ?? phase.focus}</p>
+                            </div>
+                            <Badge className={cn("rounded-full", phase.style.tone)}>{phase.focus}</Badge>
+                          </div>
+                          <p className="mt-3 text-sm font-medium">{phase.goal}</p>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">{phase.objective}</p>
+                          <div className={cn("mt-4 rounded-xl border p-3", phase.style.border, phase.style.glow)}>
+                            <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">やること</p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">{phase.detail}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 rounded-2xl border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground">
+                            <BookOpen className="size-4" />
+                          </span>
+                          <div>
+                            <p className="text-xs font-semibold tracking-wide text-muted-foreground">Archive Signal</p>
+                            <p className="text-sm font-medium">スプリント全体の反応を読む</p>
+                          </div>
+                        </div>
+                        <Badge variant="secondary" className="rounded-full">
+                          {archiveRecommendation ? "学習済み" : "学習待ち"}
+                        </Badge>
+                      </div>
+                      <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                        {archiveRecommendation?.summary ?? "Archive の反応ログを使って、どこで共感を取り、どこで検証募集へ持っていくかを設計します。"}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border bg-background/85 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">Strategy Matrix</p>
+                        <p className="text-sm font-medium">何について話すかを直感で選ぶ</p>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">3つの検証スタイル</p>
+                    </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      {strategyMatrixTiles.map((template) => {
+                        const active = template.id === activeTemplateId;
+                        const meta = STRATEGY_TILE_META[template.id];
+                        const fireCount = getIntensityFireCount(template.intensity);
+
+                        return (
+                          <button
+                            key={template.id}
+                            type="button"
+                            onClick={() => applyStrategyTemplate(template.id)}
+                            className={cn(
+                              "flex min-h-[248px] flex-col rounded-3xl border bg-background/80 px-4 py-4 text-left transition-all hover:bg-background/95",
+                              active
+                                ? cn("border-foreground/30 bg-background shadow-sm ring-2 ring-offset-2", chameleon.ring)
+                                : "border-border/70 hover:border-border",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-1.5">
+                                {Array.from({ length: 3 }, (_, index) => (
+                                  <Flame
+                                    key={`${template.id}-flame-${index}`}
+                                    className={cn(
+                                      "size-3.5 transition-all",
+                                      index < fireCount
+                                        ? "fill-orange-500/20 text-orange-500 dark:fill-orange-400/25 dark:text-orange-400 opacity-100"
+                                        : "text-zinc-300/65 dark:text-zinc-700/70 opacity-100",
+                                    )}
+                                  />
+                                ))}
+                              </div>
+                              <span className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground">
+                                {meta.icon}
+                              </span>
+                            </div>
+                            <div className="mt-5 flex-1">
+                              <p className="text-base font-semibold">{template.label}</p>
+                              <p className="mt-2 text-sm leading-6 text-muted-foreground">{template.summary}</p>
+                            </div>
+                            <div className="mt-4 border-t border-border/60 pt-3">
+                              <AnimatePresence initial={false} mode="wait">
+                                {active ? (
+                                  <motion.div
+                                    key={`${template.id}-details-active`}
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -4 }}
+                                    className="flex min-h-[44px] flex-wrap gap-2"
+                                  >
+                                    <span className="rounded-full bg-muted/60 px-2.5 py-1 text-[11px] text-muted-foreground">
+                                      目的: {GOAL_LABELS[template.strategyGoal]}
+                                    </span>
+                                    <span className="rounded-full bg-muted/60 px-2.5 py-1 text-[11px] text-muted-foreground">
+                                      トーン: {EMOTION_LABELS[template.emotion]}
+                                    </span>
+                                  </motion.div>
+                                ) : (
+                                  <motion.div
+                                    key={`${template.id}-details-idle`}
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="flex min-h-[44px] items-center text-[11px] text-muted-foreground/70"
+                                  >
+                                    選択すると、この切り口の狙いがここに表示されます
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {activeStrategyDetail ? (
+                      <div className="mt-4 flex items-start gap-3 rounded-2xl border-l-2 border-violet-200/80 bg-violet-500/4 px-3 py-2 dark:border-violet-800/60 dark:bg-violet-500/8">
+                        <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground">
+                          <BookOpen className="size-4" />
+                        </span>
+                        <div className="min-w-0 pt-0.5">
+                          <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">AI Insight</p>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                            {activeStrategyInsight}{" "}
+                            <Link href="/archive" className="text-primary underline-offset-4 hover:underline">
+                              Archiveへ
+                            </Link>
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {error ? <p className="text-center text-sm text-destructive">{error}</p> : null}
+              </section>
+
+              <section className="space-y-4 rounded-3xl border bg-background/55 p-4">
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">OUTPUT</p>
+                  <p className="text-sm font-medium">{generationMode === "series" ? "30日間の流れと山谷" : "比較と次の検証"}</p>
+                </div>
+
+                <div className="rounded-2xl border bg-background/85 p-4">
+                  <p className="text-xs font-semibold tracking-wide text-muted-foreground">保存ステータス</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    生成結果は Archive に自動保存されます。コピーより先に、反応ログとして育てる前提です。
                   </p>
-                ) : null}
-              </motion.div>
-            ) : null}
+                  <div className="mt-3 rounded-2xl border bg-muted/20 p-3">
+                    <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
+                      {generationMode === "series" ? "スプリント名の下書き" : "ライブタイトル"}
+                    </p>
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.p
+                        key={`${activeTemplateId ?? "none"}-${emotion}-${intensity}-${canvasPreviewTitle || "empty"}`}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.18 }}
+                        className="mt-2 text-sm font-medium"
+                      >
+                        {generationMode === "series"
+                          ? seriesTitle || canvasSummary || "検証スプリントを選ぶと、ここに30日間のテーマが出ます"
+                          : canvasPreviewTitle || "調整すると、ここで発信案タイトルが切り替わります"}
+                      </motion.p>
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                {generationMode === "series" ? (
+                  <div className="rounded-2xl border bg-background/85 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">スプリントプレビュー</p>
+                        <p className="mt-1 text-sm text-muted-foreground">30日間の大きな流れを、山と谷のあるガントチャート風に可視化します。</p>
+                      </div>
+                      <Badge variant="secondary" className="rounded-full">
+                        30日フロー
+                      </Badge>
+                    </div>
+                    <div className="mt-4 rounded-3xl border bg-muted/20 p-4">
+                      <div className="flex items-end gap-1 rounded-2xl border bg-background/80 px-3 pb-3 pt-6">
+                        {sprintFlowDays.map((item) => (
+                          <div key={item.day} className="flex min-w-0 flex-1 items-end">
+                            <motion.div
+                              className={cn("w-full rounded-t-[10px] transition-all", item.style.bar)}
+                              initial={{ height: 10, opacity: 0.3 }}
+                              animate={{ height: item.height, opacity: 1 }}
+                              transition={{ duration: 0.45, delay: item.day * 0.012, ease: "easeOut" }}
+                              style={{ height: `${item.height}px` }}
+                              aria-hidden="true"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 grid gap-2 text-[11px] text-muted-foreground md:grid-cols-3">
+                        {sprintTimelinePhases.map((phase) => (
+                          <div key={phase.rangeLabel} className={cn("rounded-xl border p-3", phase.style.border, phase.style.glow)}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold">{phase.rangeLabel}</span>
+                              <Badge className={cn("rounded-full", phase.style.tone)}>{phase.slot?.title ?? phase.focus}</Badge>
+                            </div>
+                            <p className="mt-2 leading-5">{phase.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border bg-background/85 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">ライブプレビュー</p>
+                        <p className="mt-1 text-sm text-muted-foreground">左で書き、中央で選ぶたびに見出しの断片が先に育ちます。</p>
+                      </div>
+                      <Badge variant="secondary" className="rounded-full">
+                        Title only
+                      </Badge>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {previewCandidates.map((candidate, index) => {
+                        const active = selectedPreviewIndex === index;
+                        return (
+                          <button
+                            key={`${candidate.focus}-${index}`}
+                            type="button"
+                            onClick={() => setSelectedPreviewIndex(index)}
+                            className={cn(
+                              "w-full rounded-2xl border bg-background/90 p-3 text-left transition-all hover:bg-background",
+                              active ? cn("shadow-sm ring-2 ring-offset-2", chameleon.ring) : "border-border/70",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <Badge variant="outline" className="rounded-full text-[11px]">
+                                {candidate.focus}
+                              </Badge>
+                              {active ? <Check className="size-4 text-green-600" /> : null}
+                            </div>
+                            <AnimatePresence mode="wait" initial={false}>
+                              <motion.p
+                                key={`${candidate.title}-${emotion}-${intensity}-${generationMode}`}
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -6 }}
+                                transition={{ duration: 0.16 }}
+                                className="mt-3 text-sm font-medium leading-6"
+                              >
+                                {candidate.title}
+                              </motion.p>
+                            </AnimatePresence>
+                            <p className="mt-2 text-xs text-muted-foreground">{candidate.note}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <AnimatePresence mode="wait">
+                  {loading ? (
+                    <motion.div key="sk" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <GenerationSkeleton />
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+
+                {!loading &&
+                ((resultMode === "single" && variants.length === 3) || (resultMode === "series" && seriesItems.length === 3)) ? (
+                  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                    {ghostWhisper ? (
+                      <div className="rounded-2xl border border-violet-200/70 bg-violet-50/70 p-3 text-sm text-violet-950 dark:border-violet-800/60 dark:bg-violet-950/30 dark:text-violet-100">
+                        <p className="text-xs font-semibold uppercase tracking-wide">Persona DNA からの示唆</p>
+                        <p className="mt-1 leading-relaxed">{ghostWhisper}</p>
+                      </div>
+                    ) : null}
+
+                    {resultMode === "series" ? (
+                      <div className="rounded-2xl border bg-muted/20 p-4">
+                        <p className="text-sm font-medium text-muted-foreground">検証スプリント名</p>
+                        <p className="mt-1 text-lg font-semibold text-foreground">{seriesTitle}</p>
+                      </div>
+                    ) : null}
+
+                    {resultMode === "single" ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-background/85 p-3">
+                        <div>
+                          <p className="text-xs font-semibold tracking-wide text-muted-foreground">Persona DNAの微調整</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            いまの案をベースに、Persona DNA の出力温度を少しだけ寄せ直して3案を引き直します。
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary" className="rounded-full">
+                            {EMOTION_LABELS[emotion]} {intensity}% / {dnaAdjustmentCopy.intensityLabel}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={loading || uploading || intensity >= 100}
+                            onClick={() => {
+                              void nudgeIntensity("stronger");
+                            }}
+                          >
+                            {dnaAdjustmentCopy.strongerLabel}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={loading || uploading || intensity <= 0}
+                            onClick={() => {
+                              void nudgeIntensity("softer");
+                            }}
+                          >
+                            {dnaAdjustmentCopy.softerLabel}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {resultMode === "series" ? (
+                      <div className="rounded-3xl border bg-background/90 p-4 shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold tracking-wide text-muted-foreground">30日間の大きな流れ</p>
+                            <p className="mt-1 text-sm font-medium">山と谷を見ながら、どこで何を検証するかを確認</p>
+                          </div>
+                          <Badge variant="outline" className="rounded-full text-[11px]">
+                            ガント風ビュー
+                          </Badge>
+                        </div>
+                        <div className="mt-4 rounded-3xl border bg-muted/20 p-4">
+                          <div className="flex items-end gap-1 rounded-2xl border bg-background/80 px-3 pb-3 pt-6">
+                            {sprintFlowDays.map((item) => (
+                              <div key={item.day} className="flex min-w-0 flex-1 items-end">
+                                <motion.div
+                                  className={cn("w-full rounded-t-[10px]", item.style.bar)}
+                                  initial={{ height: 10, opacity: 0.3 }}
+                                  animate={{ height: item.height, opacity: 1 }}
+                                  transition={{ duration: 0.45, delay: item.day * 0.012, ease: "easeOut" }}
+                                  style={{ height: `${item.height}px` }}
+                                  aria-hidden="true"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>DAY 1</span>
+                            <span>DAY 10</span>
+                            <span>DAY 20</span>
+                            <span>DAY 30</span>
+                          </div>
+                          <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                            {sprintTimelinePhases.map((phase, index) => {
+                              const item = seriesItems[index];
+
+                              return (
+                                <div key={phase.rangeLabel} className={cn("rounded-2xl border p-4", phase.style.border, phase.style.glow)}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <Badge className={cn("rounded-full", phase.style.tone)}>{phase.slot?.title ?? phase.focus}</Badge>
+                                    <span className="text-[11px] font-semibold text-muted-foreground">{phase.rangeLabel}</span>
+                                  </div>
+                                  <p className="mt-3 text-sm font-medium">{phase.goal}</p>
+                                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{item?.body ?? phase.detail}</p>
+                                  {item?.validationMetric ? (
+                                    <div className="mt-3 rounded-xl border border-dashed bg-background/80 p-3">
+                                      <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">成功指標</p>
+                                      <p className="mt-1 text-xs text-muted-foreground">{item.validationMetric}</p>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {variants.map((text, index) => {
+                          const picked = selectedIndex === index;
+                          const variantFocus = variantFocuses[index] ?? `仮説の切り口 ${index + 1}`;
+                          const label = `仮説案 ${index + 1}`;
+
+                          return (
+                            <button
+                              key={index}
+                              type="button"
+                              onClick={() => selectVariant(index)}
+                              className={cn(
+                                "w-full rounded-2xl border-2 bg-background/90 p-4 text-left shadow-sm transition-all hover:shadow-md",
+                                picked ? cn("ring-2 ring-offset-2", chameleon.ring) : "border-border",
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <Badge variant="outline">{label}</Badge>
+                                {picked ? <Check className="size-4 text-green-600" /> : null}
+                              </div>
+                              <p className="mt-3 inline-flex rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium">
+                                【{variantFocus}】重視
+                              </p>
+                              <p className="mt-3 text-sm leading-7 text-foreground">{text}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {adviceHint ? (
+                      <div className="rounded-xl border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground">
+                        観測ポイント: {adviceHint}
+                      </div>
+                    ) : null}
+
+                    {resultMode === "single" && hashtags.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {hashtags.map((tag) => (
+                          <Badge key={tag} variant="outline" className="rounded-full text-[11px]">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {memoryTags.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {memoryTags.map((tag) => (
+                          <Badge key={tag} variant="secondary" className="rounded-full">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="flex flex-wrap gap-2">
+                      <Link href="/archive">
+                        <Button type="button">反応ログを見る</Button>
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          if (resultMode === "series") {
+                            void copySeriesBundle();
+                            return;
+                          }
+                          void copyText(variants.join("\n\n"));
+                        }}
+                        className="text-xs text-muted-foreground"
+                      >
+                        テキストを控える
+                      </Button>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="rounded-2xl border border-dashed bg-background/80 p-4">
+                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">本文はまだ確定していません</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        今は右上のタイトル断片だけがリアルタイムで育っています。気になる案が見つかったら、下のバーから検証を開始してください。
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-dashed bg-background/80 p-4">
+                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">比較の視点</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        先に見出しの切れ味を見つけてから、本文を重く生成する流れに変えています。
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
           </CardContent>
         </Card>
+      </div>
+
+      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 px-4">
+        <div className="pointer-events-auto mx-auto w-full max-w-[1560px] rounded-2xl border bg-background/92 p-3 shadow-2xl backdrop-blur">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold tracking-wide text-muted-foreground">Deploy</p>
+              <p className="mt-1 truncate text-sm font-medium">{deployTitle}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{deployHint}</p>
+            </div>
+            <Button
+              type="button"
+              size="lg"
+              disabled={!storedSeed.trim() || uploading || loading || (canvasQuestion !== "" && !hasRefinementAnswer)}
+              onClick={() => {
+                void runGenerate({ modeOverride: generationMode });
+              }}
+              className="min-w-[240px]"
+            >
+              {loading ? "本文を組み立て中…" : generationMode === "series" ? "現在の仮説で検証スプリントを設計する" : "現在の仮説で検証を開始する"}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

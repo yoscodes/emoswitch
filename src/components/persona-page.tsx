@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Fingerprint, Flame, Sparkles, Wand2 } from "lucide-react";
 
-import { analyzePersona, fetchArchiveOverview, fetchGhostSettings, updateGhostSettings } from "@/lib/api-client";
+import { analyzePersona, fetchArchiveInsights, fetchGhostSettings, updateGhostSettings } from "@/lib/api-client";
 import { useAuthSession } from "@/lib/use-auth-session";
-import type { ArchiveOverview, GhostSettings } from "@/lib/types";
+import type { ArchiveInsights, GhostSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,7 +34,7 @@ export function PersonaPage() {
   const [keywordDrafts, setKeywordDrafts] = useState<string[]>(normalizeKeywordDraft([]));
   const [summaryDraft, setSummaryDraft] = useState("");
   const [stylePromptDraft, setStylePromptDraft] = useState("");
-  const [archiveOverview, setArchiveOverview] = useState<ArchiveOverview | null>(null);
+  const [archiveInsights, setArchiveInsights] = useState<ArchiveInsights | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -48,10 +48,10 @@ export function PersonaPage() {
       return;
     }
 
-    void Promise.all([fetchGhostSettings(), fetchArchiveOverview()])
-      .then(([data, overview]) => {
+    void Promise.all([fetchGhostSettings(), fetchArchiveInsights()])
+      .then(([data, insights]) => {
         setSettings(data);
-        setArchiveOverview(overview);
+        setArchiveInsights(insights);
         setProfileUrlDraft(data.profileUrl);
         setManualPostDrafts(normalizeManualPosts(data.manualPosts));
         setKeywordDrafts(normalizeKeywordDraft(data.personaKeywords));
@@ -73,8 +73,8 @@ export function PersonaPage() {
     [manualPostDrafts],
   );
   const shouldRecommendRefresh =
-    (archiveOverview?.insights.totalHot ?? 0) >= 5 &&
-    (archiveOverview?.insights.totalHot ?? 0) > (settings?.personaLastAnalyzedHotCount ?? 0);
+    (archiveInsights?.totalHot ?? 0) >= 5 &&
+    (archiveInsights?.totalHot ?? 0) > (settings?.personaLastAnalyzedHotCount ?? 0);
 
   const handleAnalyze = async () => {
     setAnalyzing(true);
@@ -112,7 +112,7 @@ export function PersonaPage() {
         personaSummary: summaryDraft.trim(),
         stylePrompt: stylePromptDraft.trim(),
         personaStatus: "approved",
-        personaLastAnalyzedHotCount: archiveOverview?.insights.totalHot ?? settings?.personaLastAnalyzedHotCount ?? 0,
+        personaLastAnalyzedHotCount: archiveInsights?.totalHot ?? settings?.personaLastAnalyzedHotCount ?? 0,
       });
       setSettings(next);
       setManualPostDrafts(normalizeManualPosts(next.manualPosts));
@@ -168,7 +168,7 @@ export function PersonaPage() {
                 <p className="text-sm font-medium">新しい成功パターンが見つかりました</p>
               </div>
               <p className="text-sm text-muted-foreground">
-                Archive で 🔥 が {archiveOverview?.insights.totalHot ?? 0} 件たまりました。いま再分析すると、承認済みペルソナに最近の市場反応を取り込めます。
+                Archive で 🔥 が {archiveInsights?.totalHot ?? 0} 件たまりました。いま再分析すると、承認済みペルソナに最近の市場反応を取り込めます。
               </p>
             </div>
             <Button type="button" onClick={() => void handleAnalyze()} disabled={analyzing}>

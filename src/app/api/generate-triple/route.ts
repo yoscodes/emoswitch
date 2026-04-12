@@ -74,6 +74,7 @@ const seriesResultSchema = z.object({
         slotLabel: z.string(),
         body: z.string().describe("各フェーズで何を発信し何を検証するかの要約"),
         hashtags: z.array(z.string()).min(2).max(6),
+        validationMetric: z.string().min(8).max(60).optional().describe("このフェーズで観測すべき検証指標"),
       }),
     )
     .length(3),
@@ -218,6 +219,7 @@ export async function POST(request: Request) {
             ),
             "3本は別案ではなく、30日を3フェーズに分けた検証セットにする。",
             "各bodyには、このフェーズで何を語り、何を検証し、どんな反応を見たいかをまとめる。",
+            "validationMetric には、このフェーズで成功とみなす検証反応を短く具体的に書くこと。",
           ].join("\n")
         : [
             "今回は単発検証モードです。",
