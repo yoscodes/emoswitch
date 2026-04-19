@@ -1,11 +1,6 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { PersonaPage as PersonaPageContent } from "@/components/persona-page";
-
-export const metadata: Metadata = {
-  title: "ペルソナ",
-};
-
-export default function PersonaPage() {
-  return <PersonaPageContent />;
+/** @deprecated `/identity` へ移行しました */
+export default function LegacyPersonaPage() {
+  redirect("/identity");
 }

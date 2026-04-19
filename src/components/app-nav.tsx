@@ -10,9 +10,9 @@ import { CreditStatus } from "@/components/credit-status";
 import { cn } from "@/lib/utils";
 
 const links = [
-  { href: "/home", label: "種", icon: Home },
-  { href: "/archive", label: "反応", icon: Archive },
-  { href: "/persona", label: "ペルソナ", icon: Fingerprint },
+  { href: "/lab", label: "種", icon: Home },
+  { href: "/vault", label: "反応", icon: Archive },
+  { href: "/identity", label: "Identity", icon: Fingerprint },
 ] as const;
 
 export function AppNav() {
@@ -27,9 +27,9 @@ export function AppNav() {
       className={cn(
         "fixed z-50 transition-all duration-500 ease-in-out",
         // モバイル: フローティングドック風
-        "bottom-4 left-4 right-4 rounded-2xl border bg-background/40 backdrop-blur-xl pb-[env(safe-area-inset-bottom)]",
+        "bottom-4 left-4 right-4 rounded-2xl border border-border/30 bg-background/45 backdrop-blur-xl pb-[env(safe-area-inset-bottom)]",
         // デスクトップ: 上部固定のクリスタルヘッダー
-        "md:bottom-auto md:top-0 md:left-0 md:right-0 md:rounded-none md:border-b md:border-t-0 md:bg-background/20"
+        "md:bottom-auto md:top-0 md:left-0 md:right-0 md:rounded-none md:border-b md:border-border/25 md:border-t-0 md:bg-linear-to-b md:from-violet-100/35 md:via-fuchsia-50/15 md:to-background/95 dark:md:from-violet-950/30 dark:md:via-fuchsia-950/10 dark:md:to-background/90"
       )}
       style={{
         // 選択中の色を影やボーダーに反映（CSS変数を活用）
@@ -44,7 +44,7 @@ export function AppNav() {
         className="absolute bottom-0 left-0 hidden h-px w-full bg-linear-to-r from-transparent via-(--mode-color,transparent) to-transparent opacity-50 md:block" 
       />
 
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-4 py-2 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6 md:py-3">
+      <div className="mx-auto flex w-full max-w-[1800px] items-center justify-between gap-2 px-4 py-2 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6 md:py-3">
         
         {/* ロゴ部分：Zapアイコンを光らせる */}
         <Link
@@ -55,7 +55,7 @@ export function AppNav() {
             <Zap className="size-4 text-(--mode-color,white) fill-(--mode-color,transparent)" />
           </div>
           <span className="bg-linear-to-r from-foreground to-foreground/60 bg-clip-text text-transparent">
-            Persona DNA
+            Identity DNA
           </span>
         </Link>
         <div className="flex items-center gap-2 md:hidden">
@@ -85,7 +85,7 @@ export function AppNav() {
                   {active && (
                     <motion.div
                       layoutId="nav-pill"
-                      className="absolute inset-0 rounded-xl border bg-primary/15 shadow-sm -z-10"
+                      className="absolute inset-0 -z-10 rounded-xl border border-violet-400/25 bg-violet-500/12 shadow-[0_0_24px_-12px_rgba(124,58,237,0.45)] dark:border-violet-500/30 dark:bg-violet-500/14"
                       transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                     />
                   )}

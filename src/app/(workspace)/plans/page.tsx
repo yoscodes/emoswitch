@@ -4,7 +4,7 @@ import { PlansContent } from "@/components/plans/plans-content";
 
 export const metadata: Metadata = {
   title: "プラン",
-  description: "Persona DNA の料金プラン。月払い・年払い（20%OFF）とクレジットトップアップ。",
+  description: "料金・クレジット",
 };
 
 export default function PlansPage() {

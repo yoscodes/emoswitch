@@ -1,11 +1,6 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { ArchivePanel } from "@/components/archive-panel";
-
-export const metadata: Metadata = {
-  title: "アーカイブ",
-};
-
-export default function ArchivePage() {
-  return <ArchivePanel />;
+/** @deprecated `/vault` へ移行しました */
+export default function LegacyArchivePage() {
+  redirect("/vault");
 }

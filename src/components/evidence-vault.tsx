@@ -266,7 +266,7 @@ function InsightsDashboard({
   );
 }
 
-export function ArchivePanel() {
+export function EvidenceVault() {
   const [overview, setOverview] = useState<ArchiveOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -331,7 +331,7 @@ export function ArchivePanel() {
       intensity: overview.insights.recommendedIntensity,
       speedMode: "flash",
     });
-    window.location.href = "/home";
+    window.location.href = "/lab";
   };
 
   const filterToolbar = (
@@ -436,7 +436,7 @@ export function ArchivePanel() {
                   {overview.entries.length === 0 ? (
                     <p>
                       まだ反応ログがありません。
-                      <Link href="/home" className="px-1 font-medium text-primary underline-offset-4 hover:underline">
+                      <Link href="/lab" className="px-1 font-medium text-primary underline-offset-4 hover:underline">
                         Seed Workspace
                       </Link>
                       で仮説を生成すると、ここが市場反応の司令塔として育ちます。
@@ -497,7 +497,7 @@ function ArchiveSingleRow({
       intensity: row.intensity,
       speedMode: row.speedMode ?? "flash",
     });
-    router.push("/home");
+    router.push("/lab");
   };
 
   const handleCopyBundle = async () => {
@@ -842,7 +842,7 @@ function ArchiveSeriesRow({
                   intensity: row.intensity,
                   speedMode: row.speedMode ?? "flash",
                 });
-                router.push("/home");
+                router.push("/lab");
               }}
               className="gap-2 text-xs"
             >

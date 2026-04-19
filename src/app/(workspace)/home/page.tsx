@@ -1,11 +1,6 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { CreateWorkspace } from "@/components/create-workspace";
-
-export const metadata: Metadata = {
-  title: "作成",
-};
-
-export default function HomePage() {
-  return <CreateWorkspace />;
+/** @deprecated `/lab` へ移行しました */
+export default function LegacyHomePage() {
+  redirect("/lab");
 }

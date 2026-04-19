@@ -11,7 +11,7 @@ function AuthCallbackContent() {
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/home";
+  const next = searchParams.get("next") ?? "/lab";
 
   useEffect(() => {
     let active = true;

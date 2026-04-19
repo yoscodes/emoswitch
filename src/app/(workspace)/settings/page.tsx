@@ -3,6 +3,7 @@ import { SettingsPage as SettingsPageContent } from "@/components/settings-page"
 
 export const metadata: Metadata = {
   title: "アカウント設定",
+  description: "アカウント設定",
 };
 
 export default function SettingsPage() {

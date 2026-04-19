@@ -21,7 +21,7 @@ export function LandingPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/home" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
+          <Link href="/lab" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
             アプリへ
           </Link>
           <div className="hidden md:block">
@@ -67,7 +67,7 @@ export function LandingPage() {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <Link
-                href="/home"
+                href="/lab"
                 className={cn(
                   buttonVariants({ size: "lg" }),
                   "inline-flex gap-2 rounded-full px-8",
@@ -78,7 +78,7 @@ export function LandingPage() {
               </Link>
               <div className="flex flex-wrap items-center gap-2">
                 <Link
-                  href="/persona"
+                  href="/identity"
                   className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-full")}
                 >
                   思想を言語化する
@@ -130,7 +130,7 @@ export function LandingPage() {
                 <span>・</span>
                 <span>仮説を発信へ変換</span>
                 <span>・</span>
-                <Link href="/home" className="underline underline-offset-2">
+                <Link href="/lab" className="underline underline-offset-2">
                   Seed Workspace を開く
                 </Link>
               </div>

@@ -37,11 +37,14 @@
 
 | パス | 内容 |
 |------|------|
-| `/` | LP（デモ枠・「使ってみる」） |
-| `/home` | メイン作成（3案＋ハッシュタグ・カメレオンUI・レバー音） |
-| `/archive` | 履歴・採用案・いいね記録（現状は localStorage） |
-| `/ghost` | マイ・ゴースト（プロフィールURL・NGワード。Vector連携は準備中） |
-| `/plans` | 料金プラン（月払い / 年払い 20%OFF・Stripe リンク） |
+| `/` | LP（思想の提示） |
+| `/lab` | Main Lab（研究・検証の場。旧 `/home` はここへリダイレクト） |
+| `/identity` | Identity Lab（Identity / DNA の精製。旧 `/persona` はここへリダイレクト） |
+| `/identity/ghost` | Ghost（Identity の一部。プロフィール・NGワード等の導線） |
+| `/vault` | Evidence Vault（金庫。旧 `/archive` はここへリダイレクト） |
+| `/ghost` | `/identity/ghost` へリダイレクト |
+| `/plans` | 料金・クレジット |
+| `/settings` | アカウント設定 |
 
 ## 実装済みAPI
 

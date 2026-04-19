@@ -493,7 +493,7 @@ export function SettingsPage() {
                       ペルソナURLを保存
                     </Button>
                   </div>
-                  <Link href="/persona" className="inline-flex">
+                  <Link href="/identity" className="inline-flex">
                     <Button>ペルソナページを開く</Button>
                   </Link>
                 </div>
