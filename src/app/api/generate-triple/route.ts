@@ -4,8 +4,9 @@ import { z } from "zod";
 
 import { inferMemoryTags } from "@/lib/memory-tags";
 import { EMOTION_LABELS, EMOTION_PROMPTS, type EmotionTone } from "@/lib/emotions";
+import { buildIdentityPromptBlock, buildShredderPromptBlock } from "@/lib/identity-prompt";
 import { SERIES_SLOT_CONFIG, getSeriesSlotLabel } from "@/lib/series";
-import { listHotGenerationMemories, resolveRequestActor } from "@/lib/supabase/services";
+import { getIdentityProfile, listHotGenerationMemories, resolveRequestActor } from "@/lib/supabase/services";
 
 export const runtime = "edge";
 
@@ -137,6 +138,22 @@ function selectRelevantMemories(
     .map(({ memory }) => memory);
 }
 
+function extractShredderHits(lines: string[]): string[] {
+  const hits = new Set<string>();
+  const re = /\[SHREDDED:([^\]]+)\]/g;
+  for (const line of lines) {
+    let match: RegExpExecArray | null;
+    match = re.exec(line);
+    while (match) {
+      const keyword = (match[1] ?? "").trim();
+      if (keyword) hits.add(keyword);
+      match = re.exec(line);
+    }
+    re.lastIndex = 0;
+  }
+  return [...hits].slice(0, 8);
+}
+
 export async function POST(request: Request) {
   try {
     const actor = await resolveRequestActor(request);
@@ -159,6 +176,7 @@ export async function POST(request: Request) {
     } = bodySchema.parse(json);
     const modelName = speedMode === "pro" ? "gemini-1.5-pro-latest" : "gemini-1.5-flash-latest";
     const hotMemories = await listHotGenerationMemories(actor.userId);
+    const identity = await getIdentityProfile(actor.userId);
     const relevantMemories = selectRelevantMemories(draft, emotion, hotMemories);
 
     const tone = emotion as EmotionTone;
@@ -229,6 +247,8 @@ export async function POST(request: Request) {
             "variantFocuses には各案が何を強調した仮説なのかを、日本語で6〜14文字程度の短いラベルで入れること。",
             "3つのラベルは役割が重複しないこと。",
           ].join("\n");
+    const identityBlock = buildIdentityPromptBlock(identity);
+    const shredderBlock = buildShredderPromptBlock(draft, identity.myTaboo);
 
     const system = [
       "あなたは、起業家の事業仮説を市場にぶつけるための日本語ストラテジストです。",
@@ -240,11 +260,14 @@ export async function POST(request: Request) {
       "ghostWhisperは、成功メモを今回どう活かしたかを伝える短い一言。自然な日本語で、過去の勝ち筋との接点を1つだけ伝える。",
       "成功メモがあるときだけghostWhisperを入れ、具体的に使った視点・構成・空気感を1つだけ触れる。70文字以内。",
       "成功メモがないとき、または今回の素材と結びつけにくいときはghostWhisperを省略する。",
+      "SHREDDERタグの扱い: [SHREDDED:<語句>] は禁止語の検知サイン。必ず同じ文で代替表現へ言い換えること。",
       ngLine,
       styleLine,
       personaLine,
       memoryLine,
       structureLine,
+      identityBlock,
+      shredderBlock,
       `今回の目的: ${STRATEGY_LABELS[strategyGoal]} / ${STRATEGY_PROMPTS[strategyGoal]}`,
       `市場への見せ方: ${EMOTION_LABELS[tone]} / ${EMOTION_PROMPTS[tone]}`,
       `打ち出し強度（0-100）: ${intensity}。高いほど宣言的、低いほど観察的。`,
@@ -260,6 +283,10 @@ export async function POST(request: Request) {
 
     if (generationMode === "series") {
       const seriesObject = object as z.infer<typeof seriesResultSchema>;
+      const shredderHits = extractShredderHits([
+        seriesObject.seriesTitle,
+        ...seriesObject.items.map((item) => item.body),
+      ]);
       return Response.json({
         ...seriesObject,
         memoryTags: inferMemoryTags(
@@ -267,16 +294,19 @@ export async function POST(request: Request) {
           ...seriesObject.items.map((item) => item.body),
           ...relevantMemories.flatMap((memory) => memory.memoryTags),
         ),
+        shredderHits,
       });
     }
 
     const singleObject = object as z.infer<typeof singleResultSchema>;
+    const shredderHits = extractShredderHits(singleObject.variants);
     return Response.json({
       ...singleObject,
       memoryTags: inferMemoryTags(
         ...singleObject.variants,
         ...relevantMemories.flatMap((memory) => memory.memoryTags),
       ),
+      shredderHits,
     });
   } catch (error) {
     const message =

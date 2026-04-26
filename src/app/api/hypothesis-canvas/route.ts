@@ -1,6 +1,8 @@
 import { google } from "@ai-sdk/google";
 import { generateObject } from "ai";
 import { z } from "zod";
+import { buildIdentityPromptBlock, buildShredderPromptBlock } from "@/lib/identity-prompt";
+import { getIdentityProfile, resolveRequestActor } from "@/lib/supabase/services";
 
 export const runtime = "edge";
 
@@ -26,6 +28,7 @@ const canvasSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const actor = await resolveRequestActor(request);
     const {
       draft,
       refinementAnswer,
@@ -36,6 +39,7 @@ export async function POST(request: Request) {
       personaSummary,
       strategyLabel,
     } = bodySchema.parse(await request.json());
+    const identity = await getIdentityProfile(actor.userId);
 
     if (draft.trim().length < 12) {
       return Response.json({
@@ -57,6 +61,8 @@ export async function POST(request: Request) {
             .filter(Boolean)
             .join("\n")
         : "ペルソナ情報なし";
+    const identityBlock = buildIdentityPromptBlock(identity);
+    const shredderBlock = buildShredderPromptBlock(draft, identity.myTaboo);
 
     const { object } = await generateObject({
       model: google("gemini-1.5-flash-latest"),
@@ -68,9 +74,12 @@ export async function POST(request: Request) {
         "summary は『今回ぶつける仮説はこれですね』に続く1行として自然な日本語にする。",
         "previewTitle は発信案のタイトルプレビュー。SNS見出しのように短く、でも煽りすぎない。",
         "question は曖昧さを削るための逆質問を1つだけ。抽象的ではなく、答えると仮説が前進する問いにする。",
+        "タブー候補に触れる語を提案する場合は [SHREDDED:<語句>] を併記し、直後により安全な代替表現を提案する。",
         "dnaAlignment は、ペルソナDNAとの一致率を0〜100で返す。DNA情報が少ない場合は50前後に寄せる。",
         "dnaReason は一致率の理由を短く説明する。",
         "warning は、DNAと大きくズレている場合だけ入れる。ズレが小さいときは null。",
+        identityBlock,
+        shredderBlock,
         "日本語で返すこと。",
       ].join("\n"),
       prompt: [

@@ -2,7 +2,8 @@ import { google } from "@ai-sdk/google";
 import { generateObject } from "ai";
 import { z } from "zod";
 
-import { getArchiveOverview, getGhostSettings, listGenerations, listHotGenerationMemories, resolveRequestActor, saveGhostSettings } from "@/lib/supabase/services";
+import { dnaAxesSchema } from "@/lib/identity-dna-schema";
+import { getArchiveOverview, getGhostSettings, getIdentityProfile, listGenerations, listHotGenerationMemories, resolveRequestActor, saveGhostSettings, saveIdentityProfile } from "@/lib/supabase/services";
 
 const DNA_CHOICE_PREFIX = "dna_choice";
 const ANTI_PERSONA_PREFIX = "anti_persona";
@@ -92,6 +93,7 @@ function parsePersonaControls(manualPosts: string[]) {
   const dnaChoices: string[] = [];
   const antiPersona: string[] = [];
   const legacyLines: string[] = [];
+  const axisChoices: Partial<Record<keyof typeof DNA_QUESTION_MAP, "left" | "right">> = {};
 
   for (const rawLine of manualPosts) {
     const line = rawLine.trim();
@@ -101,6 +103,7 @@ function parsePersonaControls(manualPosts: string[]) {
       const [, id, value] = line.split("|");
       const meta = DNA_QUESTION_MAP[id as keyof typeof DNA_QUESTION_MAP];
       if (meta && (value === "left" || value === "right")) {
+        axisChoices[id as keyof typeof DNA_QUESTION_MAP] = value;
         dnaChoices.push(`${meta.prompt}: ${value === "left" ? meta.leftLabel : meta.rightLabel}`);
         continue;
       }
@@ -119,7 +122,31 @@ function parsePersonaControls(manualPosts: string[]) {
     legacyLines.push(line);
   }
 
-  return { dnaChoices, antiPersona, legacyLines };
+  return { dnaChoices, antiPersona, legacyLines, axisChoices };
+}
+
+function buildCurrentProphecy(axisChoices: Partial<Record<keyof typeof DNA_QUESTION_MAP, "left" | "right">>): string {
+  const logicEmotion = axisChoices.logic_vs_emotion;
+  const breakHarmony = axisChoices.break_vs_harmony;
+  const crowdSolitude = axisChoices.crowd_vs_solitude;
+  if (!logicEmotion || !breakHarmony || !crowdSolitude) return "平均的な起業家";
+
+  const tone = logicEmotion === "left" ? "論理的な" : "情緒的な";
+  const posture = breakHarmony === "left" ? "異端児" : "調律者";
+  const audience = crowdSolitude === "left" ? "市場翻訳型" : "少数派特化型";
+  return `${tone}${posture} / ${audience}`;
+}
+
+function calculateDnaCompleteness(params: {
+  keywordCount: number;
+  hasSummary: boolean;
+  manualPostCount: number;
+  status: "empty" | "draft" | "approved";
+}) {
+  let score = Math.min(36, params.keywordCount * 5) + (params.hasSummary ? 14 : 0) + Math.min(32, params.manualPostCount * 4);
+  if (params.status === "approved") score = Math.max(score, 78);
+  else if (params.status === "draft") score = Math.max(score, 52);
+  return Math.min(100, score);
 }
 
 export async function POST(request: Request) {
@@ -202,7 +229,37 @@ export async function POST(request: Request) {
       actor.userId,
     );
 
-    return Response.json({ settings: nextSettings });
+    const nextAxes = dnaAxesSchema.parse({
+      logic_vs_emotion: controls.axisChoices.logic_vs_emotion ?? null,
+      break_vs_harmony: controls.axisChoices.break_vs_harmony ?? null,
+      crowd_vs_solitude: controls.axisChoices.crowd_vs_solitude ?? null,
+      speed_vs_density: controls.axisChoices.speed_vs_density ?? null,
+      utility_vs_philosophy: controls.axisChoices.utility_vs_philosophy ?? null,
+      persona_keywords: object.keywords,
+      persona_summary: object.summary,
+    });
+    const currentIdentity = await getIdentityProfile(actor.userId);
+    const nextIdentity = await saveIdentityProfile(
+      {
+        ...currentIdentity,
+        dnaAxes: nextAxes,
+        myTaboo: {
+          anti_persona: controls.antiPersona,
+          ng_words: settings.ngWords,
+        },
+        currentProphecy: buildCurrentProphecy(controls.axisChoices),
+        dnaCompleteness: calculateDnaCompleteness({
+          keywordCount: object.keywords.length,
+          hasSummary: object.summary.trim().length > 0,
+          manualPostCount: settings.manualPosts.length,
+          status: "draft",
+        }),
+        version: currentIdentity.version,
+      },
+      actor.userId,
+    );
+
+    return Response.json({ settings: nextSettings, identity: nextIdentity });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Identity の分析に失敗しました";
     return Response.json({ error: message }, { status: 500 });

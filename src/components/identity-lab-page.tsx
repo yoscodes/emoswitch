@@ -866,13 +866,13 @@ export function IdentityLabPage() {
                 );
               })}
 
-              <div className="rounded-2xl bg-linear-to-r from-violet-50/70 via-transparent to-amber-50/35 px-3 py-4 transition-all dark:from-violet-950/15 dark:to-amber-950/10 md:px-4">
-                <p className="text-[11px] font-semibold tracking-wide text-muted-foreground/85">
-                  Detected Identity（検知されたアイデンティティ）
+              <div className="rounded-2xl border border-violet-200/50 bg-linear-to-r from-violet-100/75 via-fuchsia-50/55 to-amber-50/35 px-3 py-4 shadow-[0_0_38px_-20px_rgba(139,92,246,0.9)] transition-all dark:border-violet-800/40 dark:from-violet-950/25 dark:via-fuchsia-950/20 dark:to-amber-950/10 md:px-4">
+                <p className="text-xs font-semibold tracking-wide text-violet-700/90 dark:text-violet-200/90">
+                  現在のあなたのスタンス
                 </p>
                 <p
                   className={cn(
-                    "mt-1 text-[1.45rem] font-semibold leading-tight text-violet-700 transition-all duration-300 dark:text-violet-200",
+                    "mt-2 text-[1.75rem] font-extrabold leading-tight text-violet-800 transition-all duration-300 dark:text-violet-100 md:text-[2rem]",
                     prophecyGlow && "[text-shadow:0_0_32px_rgba(139,92,246,0.55)]",
                   )}
                 >

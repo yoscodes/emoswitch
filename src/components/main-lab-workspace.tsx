@@ -189,6 +189,15 @@ function buildOpportunitySeed(params: {
   return sections.join("\n\n");
 }
 
+function extractTabooSignals(manualPosts: string[], ngWords: string[]) {
+  const tabooFromManual = manualPosts
+    .filter((line) => line.startsWith("anti_persona|"))
+    .map((line) => line.replace("anti_persona|", "").trim())
+    .filter(Boolean);
+
+  return [...new Set([...tabooFromManual, ...ngWords.map((item) => item.trim()).filter(Boolean)])].slice(0, 6);
+}
+
 type SingleResult = GenerateSingleResponse;
 type SeriesResult = GenerateSeriesResponse;
 
@@ -230,6 +239,8 @@ export function MainLabWorkspace() {
   const [quickFeedback, setQuickFeedback] = useState<QuickFeedback>(null);
   const [likesInput, setLikesInput] = useState("");
   const [memoInput, setMemoInput] = useState("");
+  const [strictWallMode, setStrictWallMode] = useState(false);
+  const [ghostNgWords, setGhostNgWords] = useState<string[]>([]);
   const [canvasSummary, setCanvasSummary] = useState("");
   const [canvasPreviewTitle, setCanvasPreviewTitle] = useState("");
   const [canvasQuestion, setCanvasQuestion] = useState("");
@@ -340,6 +351,12 @@ export function MainLabWorkspace() {
     ? archiveRecommendation?.summary ?? activeStrategyDetail.summary
     : null;
   const archiveToneLabel = archiveRecommendation?.emotion ? EMOTION_LABELS[archiveRecommendation.emotion] : null;
+  const tabooSignals = useMemo(() => extractTabooSignals(manualPosts, ghostNgWords), [ghostNgWords, manualPosts]);
+  const strictWallPrompt = useMemo(() => {
+    if (!strictWallMode || trimmedDraft.length === 0) return null;
+    const tabooText = tabooSignals.length > 0 ? `My Taboo: ${tabooSignals.join(" / ")}` : "My Taboo: 未設定";
+    return `それは本心か？市場の二番煎じになっていないか？ ${tabooText} と矛盾しないか、根拠を1つで示してください。`;
+  }, [strictWallMode, tabooSignals, trimmedDraft.length]);
   const personaStatusCopy =
     personaStatus === "approved"
       ? {
@@ -414,6 +431,44 @@ export function MainLabWorkspace() {
       : selectedPreview?.focus
         ? `優先する切り口: ${selectedPreview.focus}`
         : "見出しの断片を選ぶと、ここに反映されます。";
+  const deployChecklist = useMemo(
+    () => [
+      {
+        id: "seed",
+        label: "SEED入力",
+        done: storedSeed.trim().length > 0,
+        detail: "左カラムの仮説入力",
+      },
+      {
+        id: "identity",
+        label: "Identity整合",
+        done: canvasDnaAlignment == null || canvasDnaAlignment >= 45,
+        detail: canvasDnaAlignment == null ? "未解析" : `${canvasDnaAlignment}%`,
+      },
+      {
+        id: "wall",
+        label: "AI WALL返答",
+        done: canvasQuestion === "" || hasRefinementAnswer,
+        detail: canvasQuestion === "" ? "質問なし" : hasRefinementAnswer ? "返答済み" : "未返信",
+      },
+      {
+        id: "strategy",
+        label: "戦略選択",
+        done: generationMode === "series" ? activeTemplateId != null : selectedPreviewIndex >= 0,
+        detail: generationMode === "series" ? "スプリント戦略" : "単発プレビュー",
+      },
+    ],
+    [
+      activeTemplateId,
+      canvasDnaAlignment,
+      canvasQuestion,
+      generationMode,
+      hasRefinementAnswer,
+      selectedPreviewIndex,
+      storedSeed,
+    ],
+  );
+  const deployReadyCount = deployChecklist.filter((item) => item.done).length;
   const dnaAdjustmentCopy = useMemo(() => {
     const strongerLabel =
       emotion === "toxic"
@@ -517,6 +572,7 @@ export function MainLabWorkspace() {
         setPersonaSummary(ghost.personaSummary);
         setPersonaStatus(ghost.personaStatus);
         setManualPosts(ghost.manualPosts ?? []);
+        setGhostNgWords(ghost.ngWords ?? []);
         setArchiveRecommendation({
           summary: insights.bestPatternSummary,
           emotion: insights.recommendedEmotion,
@@ -667,6 +723,7 @@ export function MainLabWorkspace() {
         throw new Error("クレジットが残っていません。");
       }
       setManualPosts(ghost.manualPosts ?? []);
+      setGhostNgWords(ghost.ngWords ?? []);
 
       const data = await generateTriple({
         draft: storedSeed,
@@ -991,9 +1048,23 @@ export function MainLabWorkspace() {
                         <p className="text-xs font-semibold tracking-wide text-muted-foreground">AI WALL</p>
                         <p className="mt-1 text-sm font-medium">AIとの短い壁打ち</p>
                       </div>
-                      <Badge variant="secondary" className="rounded-full">
-                        {hasRefinementAnswer ? (canvasLoading ? "解釈中" : "返答あり") : "未返信"}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={strictWallMode ? "default" : "outline"}
+                          className={cn(
+                            "h-7 rounded-full px-2 text-[11px]",
+                            strictWallMode && "bg-fuchsia-600 text-white hover:bg-fuchsia-500",
+                          )}
+                          onClick={() => setStrictWallMode((current) => !current)}
+                        >
+                          強制深掘り
+                        </Button>
+                        <Badge variant="secondary" className="rounded-full">
+                          {hasRefinementAnswer ? (canvasLoading ? "解釈中" : "返答あり") : "未返信"}
+                        </Badge>
+                      </div>
                     </div>
                     <div className="mt-4 space-y-3">
                       <div className="flex justify-start">
@@ -1022,6 +1093,15 @@ export function MainLabWorkspace() {
                         </div>
                       </div>
                     </div>
+                    {strictWallPrompt ? (
+                      <div className="mt-3 rounded-2xl border border-fuchsia-300/60 bg-fuchsia-50/65 px-4 py-3 dark:border-fuchsia-700/40 dark:bg-fuchsia-950/20">
+                        <p className="text-[11px] font-semibold tracking-wide text-fuchsia-700 dark:text-fuchsia-200">AI WALL / 強制深掘りモード</p>
+                        <p className="mt-2 text-sm font-medium leading-6 text-fuchsia-900 dark:text-fuchsia-100">{strictWallPrompt}</p>
+                        <p className="mt-2 text-xs text-fuchsia-700/85 dark:text-fuchsia-200/85">
+                          Identityで定義した My Taboo を基準に、甘さのある仮説を出す前に純度を高めます。
+                        </p>
+                      </div>
+                    ) : null}
                     <p className="mt-3 text-xs leading-5 text-muted-foreground">
                       {canvasLoading && hasRefinementAnswer
                         ? "返答を受けて仮説を再解釈しています。中央カラムの1行要約がまもなく更新されます。"
@@ -1210,7 +1290,7 @@ export function MainLabWorkspace() {
                             <BookOpen className="size-4" />
                           </span>
                           <div>
-                            <p className="text-xs font-semibold tracking-wide text-muted-foreground">Archive Signal</p>
+                            <p className="text-xs font-semibold tracking-wide text-muted-foreground">Vault Signal</p>
                             <p className="text-sm font-medium">スプリント全体の反応を読む</p>
                           </div>
                         </div>
@@ -1219,7 +1299,7 @@ export function MainLabWorkspace() {
                         </Badge>
                       </div>
                       <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                        {archiveRecommendation?.summary ?? "Archive の反応ログを使って、どこで共感を取り、どこで検証募集へ持っていくかを設計します。"}
+                        {archiveRecommendation?.summary ?? "Vault の反応ログを使って、どこで共感を取り、どこで検証募集へ持っていくかを設計します。"}
                       </p>
                       {archiveRecommendation ? (
                         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1235,7 +1315,7 @@ export function MainLabWorkspace() {
                           ) : null}
                           {(archiveRecommendation.emotion || archiveRecommendation.intensity != null) ? (
                             <Button type="button" variant="ghost" size="sm" onClick={applyArchiveRecommendationPreset} className="h-7 px-2 text-xs">
-                              Archive推奨を反映
+                              Vault推奨を反映
                             </Button>
                           ) : null}
                         </div>
@@ -1317,7 +1397,7 @@ export function MainLabWorkspace() {
                               <p className="mt-1 text-xs leading-5 text-muted-foreground">
                                 {activeStrategyInsight}{" "}
                                 <Link href="/vault" className="text-primary underline-offset-4 hover:underline">
-                                  Archiveへ
+                                  Vaultへ
                                 </Link>
                               </p>
                             </div>
@@ -1358,7 +1438,7 @@ export function MainLabWorkspace() {
                     <div>
                       <p className="text-[11px] font-semibold tracking-wide text-violet-700 dark:text-violet-300">Identity Sample</p>
                       <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/85">
-                        タイトル断片のプレビュー。生成結果は Archive に保存され、反応ログとして育ちます。
+                        タイトル断片のプレビュー。生成結果は Vault に保存され、反応ログとして育ちます。
                       </p>
                     </div>
                     <span className="rounded-full border border-border/35 bg-background/60 px-2 py-1 text-[10px] text-muted-foreground">Auto save</span>
@@ -1692,7 +1772,7 @@ export function MainLabWorkspace() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold tracking-wide text-muted-foreground">検証フィードバック</p>
-                        <p className="mt-1 text-sm text-muted-foreground">市場の反応を軽く残しておくと、Archive が次の勝ち筋を学習しやすくなります。</p>
+                        <p className="mt-1 text-sm text-muted-foreground">市場の反応を軽く残しておくと、Vault が次の勝ち筋を学習しやすくなります。</p>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button
@@ -1745,6 +1825,30 @@ export function MainLabWorkspace() {
                 ) : null}
 
                 <div className="mt-auto border-t border-border/15 pt-4">
+                  <div className="mb-4 rounded-2xl border border-border/25 bg-muted/20 px-3 py-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">Deployチェック</p>
+                      <Badge variant="outline" className="rounded-full text-[11px]">
+                        {deployReadyCount}/{deployChecklist.length}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      {deployChecklist.map((item) => (
+                        <div
+                          key={item.id}
+                          className={cn(
+                            "rounded-xl border px-2.5 py-2 text-xs",
+                            item.done
+                              ? "border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-700/40 dark:bg-emerald-950/20 dark:text-emerald-200"
+                              : "border-amber-200/70 bg-amber-50/70 text-amber-700 dark:border-amber-700/40 dark:bg-amber-950/20 dark:text-amber-200",
+                          )}
+                        >
+                          <p className="font-semibold">{item.label}</p>
+                          <p className="mt-0.5 opacity-90">{item.detail}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground/70">DEPLOY</p>
@@ -1759,8 +1863,8 @@ export function MainLabWorkspace() {
                         void runGenerate({ modeOverride: generationMode });
                       }}
                       className={cn(
-                        "min-w-[168px] bg-violet-600 text-white hover:bg-violet-500",
-                        "shadow-[0_0_36px_-10px_rgba(139,92,246,0.9)]",
+                        "min-w-[184px] bg-linear-to-r from-fuchsia-600 via-violet-600 to-purple-600 text-white hover:from-fuchsia-500 hover:via-violet-500 hover:to-purple-500",
+                        "shadow-[0_0_44px_-8px_rgba(192,38,211,0.95)] ring-1 ring-fuchsia-300/45",
                       )}
                     >
                       {loading ? "本文を組み立て中…" : generationMode === "series" ? "検証スプリントを Deploy" : "検証を Deploy"}

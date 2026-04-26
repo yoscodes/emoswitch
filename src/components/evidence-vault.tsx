@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -101,6 +101,36 @@ function isSeriesEntry(entry: ArchiveEntry): entry is GenerationSeriesRecord {
 function matchesFeedback(entry: ArchiveEntry, filter: QuickFeedback | "all") {
   if (filter === "all") return true;
   return (entry.quickFeedback ?? null) === filter;
+}
+
+function normalizeDate(value: string) {
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getIdentityTags(entry: ArchiveEntry) {
+  const emotionTag =
+    entry.emotion === "toxic"
+      ? "#破壊的"
+      : entry.emotion === "useful"
+        ? "#論理的"
+        : entry.emotion === "empathy"
+          ? "#共感的"
+          : entry.emotion === "mood"
+            ? "#感性的"
+            : "#静観的";
+  const intensityTag = entry.intensity >= 75 ? "#高出力" : entry.intensity >= 45 ? "#標準出力" : "#低出力";
+  const memory = (entry.memoryTags ?? []).map((tag) => (tag.startsWith("#") ? tag : `#${tag}`)).slice(0, 2);
+  return [emotionTag, intensityTag, ...memory];
+}
+
+function buildReseedDraft(entry: ArchiveEntry) {
+  if (entry.generationMode === "single") {
+    const adopted = entry.selectedIndex != null && entry.variants[entry.selectedIndex] ? entry.variants[entry.selectedIndex] : null;
+    return [adopted, entry.draft].filter(Boolean).join("\n\n");
+  }
+  const latestItem = entry.items[entry.items.length - 1]?.body ?? "";
+  return [latestItem, entry.draft].filter(Boolean).join("\n\n");
 }
 
 function QuickFeedbackPicker({
@@ -267,15 +297,20 @@ function InsightsDashboard({
 }
 
 export function EvidenceVault() {
+  const router = useRouter();
   const [overview, setOverview] = useState<ArchiveOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [filter, setFilter] = useState<QuickFeedback | "all">("all");
   const [modeFilter, setModeFilter] = useState<"all" | "single" | "series">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "hot-first">("newest");
+  const [dateRange, setDateRange] = useState<"all" | "7d" | "30d">("all");
   const [seeding, setSeeding] = useState(false);
   const [seedStatus, setSeedStatus] = useState<string | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -317,10 +352,63 @@ export function EvidenceVault() {
     }
   };
 
-  const entries = (overview?.entries ?? []).filter((entry) => {
-    if (modeFilter !== "all" && entry.generationMode !== modeFilter) return false;
-    return matchesFeedback(entry, filter);
-  });
+  const entries = useMemo(() => {
+    const now = Date.now();
+    const fromTime =
+      dateRange === "7d"
+        ? now - 7 * 24 * 60 * 60 * 1000
+        : dateRange === "30d"
+          ? now - 30 * 24 * 60 * 60 * 1000
+          : null;
+    const query = searchQuery.trim().toLowerCase();
+
+    const filtered = (overview?.entries ?? []).filter((entry) => {
+      if (modeFilter !== "all" && entry.generationMode !== modeFilter) return false;
+      if (!matchesFeedback(entry, filter)) return false;
+      if (fromTime != null && normalizeDate(entry.createdAt) < fromTime) return false;
+      if (query === "") return true;
+
+      const chunks =
+        entry.generationMode === "series"
+          ? [
+              entry.title,
+              entry.draft,
+              entry.adviceHint ?? "",
+              entry.ghostWhisper ?? "",
+              ...(entry.memoryTags ?? []),
+              ...entry.items.flatMap((item) => [item.body, ...item.hashtags, ...(item.memoryTags ?? [])]),
+            ]
+          : [
+              entry.draft,
+              ...entry.variants,
+              ...entry.hashtags,
+              entry.memo ?? "",
+              entry.adviceHint ?? "",
+              ...(entry.memoryTags ?? []),
+            ];
+      return chunks.join(" ").toLowerCase().includes(query);
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "hot-first") {
+        const aHot = a.quickFeedback === "hot" ? 1 : 0;
+        const bHot = b.quickFeedback === "hot" ? 1 : 0;
+        if (aHot !== bHot) return bHot - aHot;
+      }
+      const aTime = normalizeDate(a.createdAt);
+      const bTime = normalizeDate(b.createdAt);
+      return sortBy === "oldest" ? aTime - bTime : bTime - aTime;
+    });
+  }, [dateRange, filter, modeFilter, overview?.entries, searchQuery, sortBy]);
+  const selectedEntry = entries.find((entry) => entry.id === selectedEntryId) ?? entries[0] ?? null;
+
+  useEffect(() => {
+    if (entries.length === 0) {
+      setSelectedEntryId(null);
+      return;
+    }
+    setSelectedEntryId((current) => (current && entries.some((entry) => entry.id === current) ? current : entries[0].id));
+  }, [entries]);
 
   const handleApplyInsight = () => {
     if (!overview?.insights.recommendedEmotion || overview.insights.recommendedIntensity == null) return;
@@ -333,6 +421,19 @@ export function EvidenceVault() {
     });
     window.location.href = "/lab";
   };
+
+  const handleReseedEntry = useCallback(
+    (entry: ArchiveEntry) => {
+      writeReuseSession({
+        draft: buildReseedDraft(entry),
+        emotion: entry.emotion,
+        intensity: entry.intensity,
+        speedMode: entry.speedMode ?? "flash",
+      });
+      router.push("/lab");
+    },
+    [router],
+  );
 
   const filterToolbar = (
     <div className="rounded-2xl border border-border/70 bg-muted/35 px-3 py-2 shadow-sm">
@@ -372,9 +473,86 @@ export function EvidenceVault() {
             </Button>
           ))}
         </div>
+        <div className="h-5 w-px shrink-0 bg-border/70" />
+        <div className="flex items-center gap-1.5">
+          <select
+            value={dateRange}
+            onChange={(event) => setDateRange(event.target.value as "all" | "7d" | "30d")}
+            className="h-7 rounded-full border border-border bg-background/90 px-2 text-[11px] text-muted-foreground"
+          >
+            <option value="all">全期間</option>
+            <option value="7d">直近7日</option>
+            <option value="30d">直近30日</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value as "newest" | "oldest" | "hot-first")}
+            className="h-7 rounded-full border border-border bg-background/90 px-2 text-[11px] text-muted-foreground"
+          >
+            <option value="newest">新着順</option>
+            <option value="oldest">古い順</option>
+            <option value="hot-first">反応あり優先</option>
+          </select>
+        </div>
+      </div>
+      <div className="mt-2">
+        <input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="キーワード検索（タイトル・本文・タグ・メモ）"
+          className="h-9 w-full rounded-xl border border-border/70 bg-background/90 px-3 text-xs outline-none placeholder:text-muted-foreground/80"
+        />
       </div>
     </div>
   );
+
+  const leftColumn = (
+    <section className="space-y-4 lg:sticky lg:top-24">
+      <Card className="border border-border/60 bg-background/85">
+        <CardContent className="space-y-3 p-4">
+          <p className="text-xs font-semibold tracking-wide text-muted-foreground">FILTER / CONTROL</p>
+          {filterToolbar}
+          <Button type="button" variant="outline" onClick={() => void handleSeedSamples()} disabled={seeding} className="w-full">
+            {seeding ? "サンプル反応ログを追加中..." : "サンプルログを入れる"}
+          </Button>
+          {seedStatus ? <p className="text-xs text-emerald-600">{seedStatus}</p> : null}
+          {seedError ? <p className="text-xs text-destructive">{seedError}</p> : null}
+        </CardContent>
+      </Card>
+    </section>
+  );
+
+  const rightColumn = overview ? (
+    <section className="space-y-4 lg:sticky lg:top-24">
+      <Card className="border border-violet-200/60 bg-violet-50/45 dark:border-violet-900/40 dark:bg-violet-950/15">
+        <CardContent className="space-y-3 p-4">
+          <p className="text-xs font-semibold tracking-wide text-muted-foreground">DETAIL PREVIEW</p>
+          {selectedEntry ? (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {getIdentityTags(selectedEntry).map((tag) => (
+                  <Badge key={`${selectedEntry.id}-${tag}`} variant="secondary" className="rounded-full text-[11px]">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+              <p className="text-sm leading-6 text-foreground">
+                {selectedEntry.generationMode === "series" ? selectedEntry.title : selectedEntry.variants[selectedEntry.selectedIndex ?? 0] ?? selectedEntry.draft}
+              </p>
+              <p className="text-xs text-muted-foreground">{formatDate(selectedEntry.createdAt)}</p>
+              <Button type="button" onClick={() => handleReseedEntry(selectedEntry)} className="w-full gap-2">
+                <Wand2 className="size-3.5" />
+                Re-seedしてLabへ戻る
+              </Button>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">リストからログを選ぶと、ここで詳細を再播種できます。</p>
+          )}
+        </CardContent>
+      </Card>
+      <InsightsDashboard overview={overview} compact onApplyInsight={handleApplyInsight} />
+    </section>
+  ) : null;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 pb-28 md:px-6">
@@ -391,41 +569,34 @@ export function EvidenceVault() {
           <CardContent className="py-12 text-center text-sm text-destructive">{error}</CardContent>
         </Card>
       ) : overview == null ? null : (
-        <div className="space-y-6 md:pr-[304px] lg:pr-[320px]">
+        <div className="grid gap-6 lg:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.7fr)_minmax(280px,0.95fr)]">
+          <div>{leftColumn}</div>
           <div className="min-w-0 space-y-6">
             <header className="space-y-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="space-y-2">
-                  <h1 className="text-2xl font-bold tracking-tight md:text-3xl">市場反応ログ</h1>
+                  <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Evidence Vault</h1>
                   <p className="text-muted-foreground">
-                    今のあなたの事業仮説がどう受け止められたかを見える化し、次の検証へつなげます。
+                    ここは情報のストック場所です。過去ログを資産化し、次の検証に再投入します。
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-3 md:justify-end">
-                  <Button type="button" variant="outline" onClick={() => void handleSeedSamples()} disabled={seeding}>
-                    {seeding ? "サンプル反応ログを追加中..." : "サンプルログを入れる"}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setInsightsOpen((current) => !current)}
-                    className="gap-2 md:hidden"
-                  >
-                    <BarChart3 className="size-4" />
-                    {insightsOpen ? "インサイトを隠す" : "インサイトを表示"}
-                    <ChevronDown className={cn("size-3.5 transition-transform", insightsOpen && "rotate-180")} />
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setInsightsOpen((current) => !current)}
+                  className="gap-2 lg:hidden"
+                >
+                  <BarChart3 className="size-4" />
+                  {insightsOpen ? "インサイトを隠す" : "インサイトを表示"}
+                  <ChevronDown className={cn("size-3.5 transition-transform", insightsOpen && "rotate-180")} />
+                </Button>
               </div>
-              <p className="text-xs text-muted-foreground">デモや初期検証用に、市場反応ログのサンプルを追加できます。</p>
-              {filterToolbar}
-              {seedStatus ? <p className="text-sm text-emerald-600">{seedStatus}</p> : null}
-              {seedError ? <p className="text-sm text-destructive">{seedError}</p> : null}
+              <p className="text-xs text-muted-foreground">反応の蓄積、傾向把握、Re-seedまでを1ページで回します。</p>
             </header>
 
             {insightsOpen ? (
-              <div className="md:hidden">
+              <div className="lg:hidden">
                 <InsightsDashboard overview={overview} onApplyInsight={handleApplyInsight} />
               </div>
             ) : null}
@@ -451,19 +622,28 @@ export function EvidenceVault() {
                 {entries.map((entry) => (
                   <motion.li key={entry.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                     {isSeriesEntry(entry) ? (
-                      <ArchiveSeriesRow row={entry} onUpdate={refresh} />
+                      <ArchiveSeriesRow
+                        row={entry}
+                        onUpdate={refresh}
+                        selected={selectedEntryId === entry.id}
+                        onSelect={() => setSelectedEntryId(entry.id)}
+                        onReseed={handleReseedEntry}
+                      />
                     ) : (
-                      <ArchiveSingleRow row={entry} onUpdate={refresh} />
+                      <ArchiveSingleRow
+                        row={entry}
+                        onUpdate={refresh}
+                        selected={selectedEntryId === entry.id}
+                        onSelect={() => setSelectedEntryId(entry.id)}
+                        onReseed={handleReseedEntry}
+                      />
                     )}
                   </motion.li>
                 ))}
               </ul>
             )}
           </div>
-
-          <aside className="hidden md:block md:fixed md:top-24 md:right-[max(1.5rem,calc((100vw-80rem)/2+1.5rem))] md:w-[280px]">
-            <InsightsDashboard overview={overview} compact onApplyInsight={handleApplyInsight} />
-          </aside>
+          <div>{rightColumn}</div>
         </div>
       )}
     </div>
@@ -473,11 +653,16 @@ export function EvidenceVault() {
 function ArchiveSingleRow({
   row,
   onUpdate,
+  selected,
+  onSelect,
+  onReseed,
 }: {
   row: GenerationRecord;
   onUpdate: () => Promise<void> | void;
+  selected: boolean;
+  onSelect: () => void;
+  onReseed: (entry: ArchiveEntry) => void;
 }) {
-  const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [othersOpen, setOthersOpen] = useState(false);
   const [quickFeedback, setQuickFeedback] = useState<QuickFeedback>(row.quickFeedback ?? null);
@@ -491,13 +676,7 @@ function ArchiveSingleRow({
   }, [row.quickFeedback]);
 
   const handleReuseSettings = () => {
-    writeReuseSession({
-      draft: adoptedBody ?? row.draft,
-      emotion: row.emotion,
-      intensity: row.intensity,
-      speedMode: row.speedMode ?? "flash",
-    });
-    router.push("/lab");
+    onReseed(row);
   };
 
   const handleCopyBundle = async () => {
@@ -522,7 +701,13 @@ function ArchiveSingleRow({
   };
 
   return (
-    <Card className="border-primary/5 bg-card/50 transition-colors hover:bg-card">
+    <Card
+      className={cn(
+        "border-primary/5 bg-card/50 transition-colors hover:bg-card",
+        selected && "ring-2 ring-violet-500/45 shadow-[0_0_28px_-16px_rgba(139,92,246,0.9)]",
+      )}
+      onClick={onSelect}
+    >
       <CardContent className="space-y-5 p-5">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -532,6 +717,13 @@ function ArchiveSingleRow({
             <Badge variant="secondary" className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
               {EMOTION_LABELS[row.emotion]}
             </Badge>
+            <div className="flex flex-wrap gap-1.5">
+              {getIdentityTags(row).map((tag) => (
+                <Badge key={`${row.id}-${tag}`} variant="outline" className="rounded-full text-[11px]">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
             <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <Clock className="size-3.5" />
               <span>{formatDate(row.createdAt)}</span>
@@ -592,8 +784,8 @@ function ArchiveSingleRow({
           <QuickFeedbackPicker value={quickFeedback} saving={feedbackSaving} onChange={saveQuickFeedback} />
           <Button type="button" size="sm" variant="outline" onClick={handleReuseSettings} className="gap-2 text-xs">
             <Wand2 className="size-3.5" />
-            <span className="hidden sm:inline">この仮説で次を検証</span>
-            <span className="sm:hidden">調整</span>
+            <span className="hidden sm:inline">Re-seed（再播種）</span>
+            <span className="sm:hidden">Re-seed</span>
           </Button>
           <Button
             type="button"
@@ -735,11 +927,16 @@ function SeriesItemCard({
 function ArchiveSeriesRow({
   row,
   onUpdate,
+  selected,
+  onSelect,
+  onReseed,
 }: {
   row: GenerationSeriesRecord;
   onUpdate: () => Promise<void> | void;
+  selected: boolean;
+  onSelect: () => void;
+  onReseed: (entry: ArchiveEntry) => void;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const hotCount = row.items.filter((item) => item.quickFeedback === "hot").length;
   const latestItem = row.items[row.items.length - 1] ?? null;
@@ -748,7 +945,13 @@ function ArchiveSeriesRow({
     <div className="relative">
       <div className="absolute inset-x-4 top-3 h-full rounded-3xl border bg-card/20" />
       <div className="absolute inset-x-2 top-1.5 h-full rounded-3xl border bg-card/30" />
-      <Card className="relative border-primary/5 bg-card/60 shadow-sm">
+      <Card
+        className={cn(
+          "relative border-primary/5 bg-card/60 shadow-sm",
+          selected && "ring-2 ring-violet-500/45 shadow-[0_0_28px_-16px_rgba(139,92,246,0.9)]",
+        )}
+        onClick={onSelect}
+      >
         <CardContent className="space-y-5 p-5">
           <header className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-2">
@@ -759,6 +962,13 @@ function ArchiveSeriesRow({
                 <Badge variant="outline" className="rounded-full">
                   {EMOTION_LABELS[row.emotion]}
                 </Badge>
+                <div className="flex flex-wrap gap-1.5">
+                  {getIdentityTags(row).map((tag) => (
+                    <Badge key={`${row.id}-${tag}`} variant="outline" className="rounded-full text-[11px]">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <Clock className="size-3.5" />
                   <span>{formatDate(row.createdAt)}</span>
@@ -836,19 +1046,13 @@ function ArchiveSeriesRow({
               size="sm"
               variant="outline"
               onClick={() => {
-                writeReuseSession({
-                  draft: row.draft,
-                  emotion: row.emotion,
-                  intensity: row.intensity,
-                  speedMode: row.speedMode ?? "flash",
-                });
-                router.push("/lab");
+                onReseed(row);
               }}
               className="gap-2 text-xs"
             >
               <Wand2 className="size-3.5" />
-              <span className="hidden sm:inline">この仮説で次を検証</span>
-              <span className="sm:hidden">調整</span>
+              <span className="hidden sm:inline">Re-seed（再播種）</span>
+              <span className="sm:hidden">Re-seed</span>
             </Button>
             <Button
               type="button"

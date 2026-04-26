@@ -26,10 +26,17 @@ const DEMO_DISPLAY_NAME = "デモユーザー";
 const ENSURED_USER_TTL_MS = 5 * 60_000;
 const AUTH_USER_TTL_MS = 60_000;
 const ARCHIVE_OVERVIEW_TTL_MS = 15_000;
+const LEGACY_BACKFILL_INTERVAL_MS = 15 * 60_000;
+const NEW_SCHEMA_FALLBACK_RETIRE_THRESHOLD = 0.95;
 
 const ensuredUserCache = new Map<string, number>();
 const authenticatedUserCache = new Map<string, { user: User; expiresAt: number }>();
 const archiveOverviewCache = new Map<string, { value: ArchiveOverview; expiresAt: number }>();
+const schemaCoverageCache = new Map<
+  string,
+  { value: { legacyCount: number; newCount: number; ratio: number; useLegacyFallback: boolean }; expiresAt: number }
+>();
+const legacyBackfillRunAt = new Map<string, number>();
 
 let demoUserPromise: Promise<string> | null = null;
 let demoWorkspacePromise: Promise<{ userId: string; seeded: boolean }> | null = null;
@@ -113,6 +120,57 @@ type DbArchiveInsightSeriesItemRow = {
   quick_feedback: QuickFeedback;
 };
 
+type DbHypothesisRow = {
+  id: string;
+  user_id: string;
+  generation_mode: "single" | "series";
+  seed_input: string;
+  strategy_params: {
+    emotion?: EmotionTone;
+    intensity?: number;
+    speed_mode?: "flash" | "pro" | null;
+    title?: string;
+  } | null;
+  output_content: {
+    variants?: string[];
+    hashtags?: string[];
+    selected_index?: number | null;
+    advice_hint?: string | null;
+    memory_tags?: string[];
+    title?: string;
+    ghost_whisper?: string | null;
+    items?: Array<{
+      id?: string;
+      slot_key?: SeriesSlotKey;
+      slot_label?: string;
+      body?: string;
+      hashtags?: string[];
+      quick_feedback?: QuickFeedback;
+      likes?: number | null;
+      memo?: string | null;
+      memory_tags?: string[];
+      created_at?: string;
+    }>;
+  } | null;
+  status: "draft" | "deployed" | "archived";
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+type DbVaultLogRow = {
+  id: string;
+  hypothesis_id: string;
+  reaction_type: "hot" | "cold" | "ignore" | "feedback" | "memo";
+  reaction_payload: {
+    likes?: number;
+    memo?: string;
+    series_item_id?: string;
+    slot_key?: SeriesSlotKey;
+  } | null;
+  created_at: string;
+};
+
 type SeriesInsertItem = {
   slotKey: SeriesSlotKey;
   slotLabel: string;
@@ -130,6 +188,14 @@ export type HotGenerationMemory = {
   memo: string | null;
   slotLabel?: string;
   memoryTags: string[];
+};
+
+export type IdentityProfile = {
+  dnaAxes: Record<string, unknown>;
+  myTaboo: Record<string, unknown>;
+  currentProphecy: string;
+  dnaCompleteness: number;
+  version: number;
 };
 
 type GenerationCreateInput = Omit<GenerationRecord, "id" | "createdAt">;
@@ -159,6 +225,14 @@ const DEFAULT_GHOST_SETTINGS: GhostSettings = {
   personaEvidence: [],
   personaStatus: "empty",
   personaLastAnalyzedHotCount: 0,
+};
+
+const DEFAULT_IDENTITY_PROFILE: IdentityProfile = {
+  dnaAxes: {},
+  myTaboo: {},
+  currentProphecy: "平均的な起業家",
+  dnaCompleteness: 0,
+  version: 1,
 };
 
 const DEMO_GENERATIONS: Array<{
@@ -459,6 +533,118 @@ function mapSeries(row: DbSeriesRow, items: DbSeriesItemRow[]): GenerationSeries
   };
 }
 
+function asArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function groupVaultLogsByHypothesis(rows: DbVaultLogRow[]): Map<string, DbVaultLogRow[]> {
+  const map = new Map<string, DbVaultLogRow[]>();
+  for (const row of rows) {
+    const current = map.get(row.hypothesis_id) ?? [];
+    current.push(row);
+    map.set(row.hypothesis_id, current);
+  }
+  for (const [key, value] of map) {
+    value.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    map.set(key, value);
+  }
+  return map;
+}
+
+function deriveQuickFeedbackFromLogs(logs: DbVaultLogRow[]): QuickFeedback {
+  const latest = logs.find((log) => log.reaction_type === "hot" || log.reaction_type === "cold");
+  if (!latest) return null;
+  return latest.reaction_type === "hot" ? "hot" : "cold";
+}
+
+function deriveLikesFromLogs(logs: DbVaultLogRow[]): number | null {
+  const latest = logs.find((log) => log.reaction_type === "feedback" && typeof log.reaction_payload?.likes === "number");
+  return latest && typeof latest.reaction_payload?.likes === "number" ? latest.reaction_payload.likes : null;
+}
+
+function deriveMemoFromLogs(logs: DbVaultLogRow[]): string | null {
+  const latest = logs.find((log) => log.reaction_type === "memo" && typeof log.reaction_payload?.memo === "string");
+  return latest && typeof latest.reaction_payload?.memo === "string" ? latest.reaction_payload.memo : null;
+}
+
+function mapSingleFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): GenerationRecord {
+  const strategy = row.strategy_params ?? {};
+  const output = row.output_content ?? {};
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    generationMode: "single",
+    draft: row.seed_input,
+    emotion: strategy.emotion ?? "empathy",
+    intensity: strategy.intensity ?? 50,
+    speedMode: strategy.speed_mode ?? undefined,
+    variants: asArray(output.variants),
+    hashtags: asArray(output.hashtags),
+    selectedIndex: typeof output.selected_index === "number" ? output.selected_index : null,
+    likes: deriveLikesFromLogs(logs),
+    memo: deriveMemoFromLogs(logs),
+    adviceHint: output.advice_hint ?? null,
+    quickFeedback: deriveQuickFeedbackFromLogs(logs),
+    memoryTags: asArray(output.memory_tags),
+  };
+}
+
+function mapSeriesFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): GenerationSeriesRecord {
+  const strategy = row.strategy_params ?? {};
+  const output = row.output_content ?? {};
+  const itemLogMap = new Map<string, DbVaultLogRow[]>();
+  for (const log of logs) {
+    const seriesItemId = log.reaction_payload?.series_item_id;
+    if (!seriesItemId) continue;
+    const current = itemLogMap.get(seriesItemId) ?? [];
+    current.push(log);
+    itemLogMap.set(seriesItemId, current);
+  }
+  const rawItems = asArray(output.items);
+  const items: GenerationSeriesItemRecord[] = rawItems.map((item, index) => ({
+    id: item.id ?? `${row.id}:${item.slot_key ?? index}`,
+    seriesId: row.id,
+    createdAt: item.created_at ?? row.created_at,
+    slotKey: (item.slot_key ?? "mon_problem") as SeriesSlotKey,
+    slotLabel: item.slot_label ?? getSeriesSlotLabel((item.slot_key ?? "mon_problem") as SeriesSlotKey),
+    body: item.body ?? "",
+    hashtags: asArray(item.hashtags),
+    quickFeedback: (() => {
+      const itemLogs = itemLogMap.get(item.id ?? "");
+      if (!itemLogs) return item.quick_feedback ?? null;
+      return deriveQuickFeedbackFromLogs(itemLogs) ?? item.quick_feedback ?? null;
+    })(),
+    likes: (() => {
+      const itemLogs = itemLogMap.get(item.id ?? "");
+      if (!itemLogs) return typeof item.likes === "number" ? item.likes : null;
+      const fromLogs = deriveLikesFromLogs(itemLogs);
+      return fromLogs ?? (typeof item.likes === "number" ? item.likes : null);
+    })(),
+    memo: (() => {
+      const itemLogs = itemLogMap.get(item.id ?? "");
+      if (!itemLogs) return item.memo ?? null;
+      return deriveMemoFromLogs(itemLogs) ?? item.memo ?? null;
+    })(),
+    memoryTags: asArray(item.memory_tags),
+  }));
+
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    generationMode: "series",
+    title: output.title ?? strategy.title ?? "30日ロードマップ",
+    draft: row.seed_input,
+    emotion: strategy.emotion ?? "empathy",
+    intensity: strategy.intensity ?? 50,
+    speedMode: strategy.speed_mode ?? undefined,
+    adviceHint: output.advice_hint ?? null,
+    ghostWhisper: output.ghost_whisper ?? null,
+    quickFeedback: deriveQuickFeedbackFromLogs(logs) ?? deriveSeriesFeedback(items),
+    memoryTags: asArray(output.memory_tags),
+    items,
+  };
+}
+
 function getUserDisplayName(user: User): string | null {
   const metadata = user.user_metadata;
   const candidates = [
@@ -517,6 +703,247 @@ function trimCache<T>(cache: Map<string, T>, maxEntries: number): void {
   if (cache.size <= maxEntries) return;
   const firstKey = cache.keys().next().value;
   if (firstKey) cache.delete(firstKey);
+}
+
+type SchemaCoverage = {
+  legacyCount: number;
+  newCount: number;
+  ratio: number;
+  useLegacyFallback: boolean;
+};
+
+export async function getSchemaCoverage(userId?: string): Promise<SchemaCoverage> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const cached = schemaCoverageCache.get(scopedUserId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const [{ count: singleCount, error: singleError }, { count: seriesCount, error: seriesError }, { count: newCount, error: newError }] =
+    await Promise.all([
+      supabaseAdmin.from("generations").select("id", { head: true, count: "exact" }).eq("user_id", scopedUserId).is("deleted_at", null),
+      supabaseAdmin.from("generation_series").select("id", { head: true, count: "exact" }).eq("user_id", scopedUserId).is("deleted_at", null),
+      supabaseAdmin.from("hypotheses").select("id", { head: true, count: "exact" }).eq("user_id", scopedUserId).is("deleted_at", null).neq("status", "draft"),
+    ]);
+
+  if (singleError) throw singleError;
+  if (seriesError) throw seriesError;
+  if (newError) throw newError;
+
+  const legacyCount = (singleCount ?? 0) + (seriesCount ?? 0);
+  const nextCount = newCount ?? 0;
+  const ratio = legacyCount === 0 ? 1 : Math.min(1, nextCount / legacyCount);
+  const value: SchemaCoverage = {
+    legacyCount,
+    newCount: nextCount,
+    ratio,
+    useLegacyFallback: ratio < NEW_SCHEMA_FALLBACK_RETIRE_THRESHOLD,
+  };
+  schemaCoverageCache.set(scopedUserId, { value, expiresAt: Date.now() + 60_000 });
+  trimCache(schemaCoverageCache, 80);
+  return value;
+}
+
+export async function backfillNewSchemaFromLegacy(userId?: string): Promise<{ upsertedHypotheses: number; upsertedLogs: number }> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const [settings, singles, series] = await Promise.all([
+    getGhostSettings(scopedUserId),
+    listGenerations(scopedUserId),
+    listGenerationSeries(scopedUserId),
+  ]);
+
+  const currentIdentity = await getIdentityProfile(scopedUserId);
+  await saveIdentityProfile(
+    {
+      ...currentIdentity,
+      dnaAxes: {
+        ...(currentIdentity.dnaAxes ?? {}),
+        persona_keywords: settings.personaKeywords,
+        persona_summary: settings.personaSummary,
+      },
+      myTaboo: {
+        ...(currentIdentity.myTaboo ?? {}),
+        anti_persona: settings.manualPosts.filter((line) => line.startsWith("anti_persona|")).map((line) => line.replace("anti_persona|", "")),
+        ng_words: settings.ngWords,
+      },
+    },
+    scopedUserId,
+  );
+
+  let upsertedHypotheses = 0;
+  let upsertedLogs = 0;
+
+  for (const row of singles) {
+    const { data, error } = await supabaseAdmin
+      .from("hypotheses")
+      .upsert(
+        {
+          user_id: scopedUserId,
+          legacy_source_type: "generation",
+          legacy_source_id: row.id,
+          generation_mode: "single",
+          seed_input: row.draft,
+          strategy_params: {
+            emotion: row.emotion,
+            intensity: row.intensity,
+            speed_mode: row.speedMode ?? null,
+          },
+          identity_snapshot: {
+            version: currentIdentity.version,
+            current_prophecy: currentIdentity.currentProphecy,
+            dna_completeness: currentIdentity.dnaCompleteness,
+            dna_axes: currentIdentity.dnaAxes,
+            my_taboo: currentIdentity.myTaboo,
+          },
+          output_content: {
+            variants: row.variants,
+            hashtags: row.hashtags,
+            selected_index: row.selectedIndex,
+            advice_hint: row.adviceHint ?? null,
+            memory_tags: row.memoryTags ?? [],
+          },
+          status: "deployed",
+          deployed_at: row.createdAt,
+        },
+        { onConflict: "legacy_source_type,legacy_source_id" },
+      )
+      .select("id")
+      .single<{ id: string }>();
+    if (error) throw error;
+    upsertedHypotheses += 1;
+    const hypothesisId = data.id;
+
+    await supabaseAdmin
+      .from("vault_logs")
+      .delete()
+      .eq("user_id", scopedUserId)
+      .eq("hypothesis_id", hypothesisId)
+      .contains("reaction_payload", { source: "legacy_backfill" });
+
+    const logRows: Array<Record<string, unknown>> = [];
+    if (row.quickFeedback) {
+      logRows.push({ user_id: scopedUserId, hypothesis_id: hypothesisId, reaction_type: row.quickFeedback, reaction_payload: { source: "legacy_backfill" } });
+    }
+    if (row.likes != null) {
+      logRows.push({ user_id: scopedUserId, hypothesis_id: hypothesisId, reaction_type: "feedback", reaction_payload: { source: "legacy_backfill", likes: row.likes } });
+    }
+    if (row.memo) {
+      logRows.push({ user_id: scopedUserId, hypothesis_id: hypothesisId, reaction_type: "memo", reaction_payload: { source: "legacy_backfill", memo: row.memo } });
+    }
+    if (logRows.length > 0) {
+      const { error: logError } = await supabaseAdmin.from("vault_logs").insert(logRows);
+      if (logError) throw logError;
+      upsertedLogs += logRows.length;
+    }
+  }
+
+  for (const row of series) {
+    const { data, error } = await supabaseAdmin
+      .from("hypotheses")
+      .upsert(
+        {
+          user_id: scopedUserId,
+          legacy_source_type: "series",
+          legacy_source_id: row.id,
+          generation_mode: "series",
+          seed_input: row.draft,
+          strategy_params: {
+            emotion: row.emotion,
+            intensity: row.intensity,
+            speed_mode: row.speedMode ?? null,
+            title: row.title,
+          },
+          identity_snapshot: {
+            version: currentIdentity.version,
+            current_prophecy: currentIdentity.currentProphecy,
+            dna_completeness: currentIdentity.dnaCompleteness,
+            dna_axes: currentIdentity.dnaAxes,
+            my_taboo: currentIdentity.myTaboo,
+          },
+          output_content: {
+            title: row.title,
+            advice_hint: row.adviceHint ?? null,
+            ghost_whisper: row.ghostWhisper ?? null,
+            memory_tags: row.memoryTags ?? [],
+            items: row.items.map((item) => ({
+              id: item.id,
+              slot_key: item.slotKey,
+              slot_label: item.slotLabel,
+              body: item.body,
+              hashtags: item.hashtags,
+              quick_feedback: item.quickFeedback,
+              likes: item.likes,
+              memo: item.memo,
+              memory_tags: item.memoryTags ?? [],
+              created_at: item.createdAt,
+            })),
+          },
+          status: "deployed",
+          deployed_at: row.createdAt,
+        },
+        { onConflict: "legacy_source_type,legacy_source_id" },
+      )
+      .select("id")
+      .single<{ id: string }>();
+    if (error) throw error;
+    upsertedHypotheses += 1;
+    const hypothesisId = data.id;
+
+    await supabaseAdmin
+      .from("vault_logs")
+      .delete()
+      .eq("user_id", scopedUserId)
+      .eq("hypothesis_id", hypothesisId)
+      .contains("reaction_payload", { source: "legacy_backfill" });
+
+    const logRows: Array<Record<string, unknown>> = [];
+    if (row.quickFeedback) {
+      logRows.push({ user_id: scopedUserId, hypothesis_id: hypothesisId, reaction_type: row.quickFeedback, reaction_payload: { source: "legacy_backfill" } });
+    }
+    for (const item of row.items) {
+      if (item.quickFeedback) {
+        logRows.push({
+          user_id: scopedUserId,
+          hypothesis_id: hypothesisId,
+          reaction_type: item.quickFeedback,
+          reaction_payload: { source: "legacy_backfill", series_item_id: item.id, slot_key: item.slotKey },
+        });
+      }
+      if (item.likes != null) {
+        logRows.push({
+          user_id: scopedUserId,
+          hypothesis_id: hypothesisId,
+          reaction_type: "feedback",
+          reaction_payload: { source: "legacy_backfill", series_item_id: item.id, slot_key: item.slotKey, likes: item.likes },
+        });
+      }
+      if (item.memo) {
+        logRows.push({
+          user_id: scopedUserId,
+          hypothesis_id: hypothesisId,
+          reaction_type: "memo",
+          reaction_payload: { source: "legacy_backfill", series_item_id: item.id, slot_key: item.slotKey, memo: item.memo },
+        });
+      }
+    }
+    if (logRows.length > 0) {
+      const { error: logError } = await supabaseAdmin.from("vault_logs").insert(logRows);
+      if (logError) throw logError;
+      upsertedLogs += logRows.length;
+    }
+  }
+
+  schemaCoverageCache.delete(scopedUserId);
+  return { upsertedHypotheses, upsertedLogs };
+}
+
+async function runPeriodicLegacyBackfill(userId: string): Promise<void> {
+  const lastRunAt = legacyBackfillRunAt.get(userId) ?? 0;
+  if (Date.now() - lastRunAt < LEGACY_BACKFILL_INTERVAL_MS) return;
+  legacyBackfillRunAt.set(userId, Date.now());
+  try {
+    await backfillNewSchemaFromLegacy(userId);
+  } catch {
+    // Do not break user requests even if maintenance backfill fails.
+  }
 }
 
 async function ensureAuthenticatedUser(user: User): Promise<string> {
@@ -876,6 +1303,38 @@ async function resolveScopedUserId(userId?: string): Promise<string> {
 
 export async function listGenerations(userId?: string): Promise<GenerationRecord[]> {
   const scopedUserId = await resolveScopedUserId(userId);
+  const coverage = await getSchemaCoverage(scopedUserId);
+  const { data: hypothesisRows, error: hypothesisError } = await supabaseAdmin
+    .from("hypotheses")
+    .select(
+      "id, user_id, generation_mode, seed_input, strategy_params, output_content, status, created_at, updated_at, deleted_at",
+    )
+    .eq("user_id", scopedUserId)
+    .eq("generation_mode", "single")
+    .neq("status", "draft")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .overrideTypes<DbHypothesisRow[]>();
+
+  if (!hypothesisError && hypothesisRows.length > 0) {
+    const ids = hypothesisRows.map((row) => row.id);
+    const { data: logs, error: logsError } = await supabaseAdmin
+      .from("vault_logs")
+      .select("id, hypothesis_id, reaction_type, reaction_payload, created_at")
+      .eq("user_id", scopedUserId)
+      .in("hypothesis_id", ids)
+      .order("created_at", { ascending: false })
+      .overrideTypes<DbVaultLogRow[]>();
+    if (logsError) throw logsError;
+
+    const grouped = groupVaultLogsByHypothesis(logs ?? []);
+    return hypothesisRows.map((row) => mapSingleFromHypothesis(row, grouped.get(row.id) ?? []));
+  }
+
+  if (!coverage.useLegacyFallback) {
+    return [];
+  }
+
   const { data, error } = await supabaseAdmin
     .from("generations")
     .select(
@@ -886,16 +1345,44 @@ export async function listGenerations(userId?: string): Promise<GenerationRecord
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .overrideTypes<DbGenerationRow[]>();
-
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return data.map((row) => mapGeneration(row as DbGenerationRow));
 }
 
 export async function listGenerationSeries(userId?: string): Promise<GenerationSeriesRecord[]> {
   const scopedUserId = await resolveScopedUserId(userId);
+  const coverage = await getSchemaCoverage(scopedUserId);
+  const { data: hypothesisRows, error: hypothesisError } = await supabaseAdmin
+    .from("hypotheses")
+    .select(
+      "id, user_id, generation_mode, seed_input, strategy_params, output_content, status, created_at, updated_at, deleted_at",
+    )
+    .eq("user_id", scopedUserId)
+    .eq("generation_mode", "series")
+    .neq("status", "draft")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .overrideTypes<DbHypothesisRow[]>();
+
+  if (!hypothesisError && hypothesisRows.length > 0) {
+    const ids = hypothesisRows.map((row) => row.id);
+    const { data: logs, error: logsError } = await supabaseAdmin
+      .from("vault_logs")
+      .select("id, hypothesis_id, reaction_type, reaction_payload, created_at")
+      .eq("user_id", scopedUserId)
+      .in("hypothesis_id", ids)
+      .order("created_at", { ascending: false })
+      .overrideTypes<DbVaultLogRow[]>();
+    if (logsError) throw logsError;
+
+    const grouped = groupVaultLogsByHypothesis(logs ?? []);
+    return hypothesisRows.map((row) => mapSeriesFromHypothesis(row, grouped.get(row.id) ?? []));
+  }
+
+  if (!coverage.useLegacyFallback) {
+    return [];
+  }
+
   const [{ data: seriesRows, error: seriesError }, { data: itemRows, error: itemsError }] = await Promise.all([
     supabaseAdmin
       .from("generation_series")
@@ -916,10 +1403,8 @@ export async function listGenerationSeries(userId?: string): Promise<GenerationS
       .order("created_at", { ascending: true })
       .overrideTypes<DbSeriesItemRow[]>(),
   ]);
-
   if (seriesError) throw seriesError;
   if (itemsError) throw itemsError;
-
   const itemsBySeries = new Map<string, DbSeriesItemRow[]>();
   for (const row of itemRows) {
     const item = row as DbSeriesItemRow;
@@ -927,7 +1412,6 @@ export async function listGenerationSeries(userId?: string): Promise<GenerationS
     current.push(item);
     itemsBySeries.set(item.series_id, current);
   }
-
   return seriesRows.map((row) => mapSeries(row as DbSeriesRow, itemsBySeries.get(row.id) ?? []));
 }
 
@@ -940,6 +1424,7 @@ export async function getArchiveOverviewWithOptions(
   options?: { includeEntries?: boolean },
 ): Promise<ArchiveOverview> {
   const scopedUserId = await resolveScopedUserId(userId);
+  await runPeriodicLegacyBackfill(scopedUserId);
   const includeEntries = options?.includeEntries ?? true;
   const cacheKey = `${scopedUserId}:${includeEntries ? "full" : "summary"}`;
   const cached = archiveOverviewCache.get(cacheKey);
@@ -960,49 +1445,16 @@ export async function getArchiveOverviewWithOptions(
         } satisfies ArchiveOverview;
       })()
     : await (async () => {
-        const [{ data: singleRows, error: singleError }, { data: seriesRows, error: seriesError }, { data: seriesItemRows, error: seriesItemError }] =
-          await Promise.all([
-            supabaseAdmin
-              .from("generations")
-              .select("emotion, intensity, quick_feedback")
-              .eq("user_id", scopedUserId)
-              .eq("generation_mode", "single")
-              .is("deleted_at", null)
-              .overrideTypes<DbArchiveInsightSingleRow[]>(),
-            supabaseAdmin
-              .from("generation_series")
-              .select("id, emotion, intensity")
-              .eq("user_id", scopedUserId)
-              .is("deleted_at", null)
-              .overrideTypes<DbArchiveInsightSeriesRow[]>(),
-            supabaseAdmin
-              .from("generation_series_items")
-              .select("series_id, quick_feedback")
-              .eq("user_id", scopedUserId)
-              .is("deleted_at", null)
-              .overrideTypes<DbArchiveInsightSeriesItemRow[]>(),
-          ]);
-
-        if (singleError) throw singleError;
-        if (seriesError) throw seriesError;
-        if (seriesItemError) throw seriesItemError;
-
-        const itemsBySeries = new Map<string, Array<{ quickFeedback?: QuickFeedback }>>();
-        for (const row of seriesItemRows) {
-          const current = itemsBySeries.get(row.series_id) ?? [];
-          current.push({ quickFeedback: row.quick_feedback });
-          itemsBySeries.set(row.series_id, current);
-        }
-
-        const singles: ArchiveInsightSingleInput[] = singleRows.map((row) => ({
+        const [entries, seriesRows] = await Promise.all([listGenerations(scopedUserId), listGenerationSeries(scopedUserId)]);
+        const singles: ArchiveInsightSingleInput[] = entries.map((row) => ({
           emotion: row.emotion,
           intensity: row.intensity,
-          quickFeedback: row.quick_feedback,
+          quickFeedback: row.quickFeedback ?? null,
         }));
         const series: ArchiveInsightSeriesInput[] = seriesRows.map((row) => ({
           emotion: row.emotion,
           intensity: row.intensity,
-          items: itemsBySeries.get(row.id) ?? [],
+          items: row.items.map((item) => ({ quickFeedback: item.quickFeedback ?? null })),
         }));
 
         return {
@@ -1022,88 +1474,42 @@ export async function getArchiveOverviewWithOptions(
 
 export async function listHotGenerationMemories(userId?: string): Promise<HotGenerationMemory[]> {
   const scopedUserId = await resolveScopedUserId(userId);
-  const [{ data: singleRows, error: singleError }, { data: seriesRows, error: seriesError }, { data: seriesItems, error: itemError }] =
-    await Promise.all([
-      supabaseAdmin
-        .from("generations")
-        .select("id, created_at, draft, emotion, variants, selected_index, likes, memo, memory_tags")
-        .eq("user_id", scopedUserId)
-        .eq("generation_mode", "single")
-        .eq("quick_feedback", "hot")
-        .is("deleted_at", null)
-        .not("selected_index", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(12)
-        .overrideTypes<DbHotGenerationMemoryRow[]>(),
-      supabaseAdmin
-        .from("generation_series")
-        .select("id, title, source_draft, emotion")
-        .eq("user_id", scopedUserId)
-        .is("deleted_at", null),
-      supabaseAdmin
-        .from("generation_series_items")
-        .select("id, series_id, created_at, slot_key, slot_label, body, likes, memo, memory_tags")
-        .eq("user_id", scopedUserId)
-        .eq("quick_feedback", "hot")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-        .limit(12),
-    ]);
-
-  if (singleError) throw singleError;
-  if (seriesError) throw seriesError;
-  if (itemError) throw itemError;
+  const [singleRows, seriesRows] = await Promise.all([listGenerations(scopedUserId), listGenerationSeries(scopedUserId)]);
 
   const singleMemories = singleRows
+    .filter((row) => row.quickFeedback === "hot")
     .map((row) => {
-      const selectedIndex = row.selected_index;
-      const selectedText =
-        selectedIndex != null && row.variants[selectedIndex] ? String(row.variants[selectedIndex]) : null;
-
+      const selectedIndex = row.selectedIndex;
+      const selectedText = selectedIndex != null && row.variants[selectedIndex] ? row.variants[selectedIndex] : null;
       if (!selectedText) return null;
-
       return {
         id: row.id,
-        createdAt: row.created_at,
+        createdAt: row.createdAt,
         draft: row.draft,
         emotion: row.emotion,
         selectedText,
         likes: row.likes,
-        memo: row.memo,
-        memoryTags: row.memory_tags ?? [],
+        memo: row.memo ?? null,
+        memoryTags: row.memoryTags ?? [],
       } satisfies HotGenerationMemory;
     })
     .filter((row): row is HotGenerationMemory => row !== null);
 
-  const seriesById = new Map(
-    (seriesRows ?? []).map((row) => [
-      String(row.id),
-      {
-        title: String(row.title),
-        draft: String(row.source_draft),
-        emotion: row.emotion as EmotionTone,
-      },
-    ]),
+  const seriesMemories: HotGenerationMemory[] = seriesRows.flatMap((row) =>
+    row.items
+      .filter((item) => item.quickFeedback === "hot")
+      .map((item) => ({
+        id: item.id,
+        createdAt: item.createdAt,
+        draft: row.draft,
+        emotion: row.emotion,
+        selectedText: item.body,
+        likes: item.likes,
+        memo: item.memo ?? null,
+        slotLabel: item.slotLabel,
+        memoryTags: item.memoryTags ?? [],
+      })),
   );
-
-  const seriesMemories: HotGenerationMemory[] = (seriesItems ?? []).flatMap((row) => {
-    const series = seriesById.get(String(row.series_id));
-    if (!series) return [];
-
-    return [
-      {
-        id: String(row.id),
-        createdAt: String(row.created_at),
-        draft: series.draft,
-        emotion: series.emotion,
-        selectedText: String(row.body),
-        likes: (row.likes as number | null) ?? null,
-        memo: (row.memo as string | null) ?? null,
-        slotLabel: String(row.slot_label),
-        memoryTags: (row.memory_tags as string[] | null) ?? [],
-      },
-    ];
-  });
 
   return [...singleMemories, ...seriesMemories]
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
@@ -1402,7 +1808,8 @@ export async function softDeleteGenerationSeries(id: string, userId?: string): P
 
 export async function getGhostSettings(userId?: string): Promise<GhostSettings> {
   const scopedUserId = await resolveScopedUserId(userId);
-  const { data, error } = await supabaseAdmin
+  const [{ data, error }, { data: identityRow }] = await Promise.all([
+    supabaseAdmin
     .from("ghost_settings")
     .select("profile_url, ng_words, style_prompt, manual_posts, persona_keywords, persona_summary, persona_evidence, persona_status, persona_last_analyzed_hot_count")
     .eq("user_id", scopedUserId)
@@ -1416,22 +1823,43 @@ export async function getGhostSettings(userId?: string): Promise<GhostSettings> 
       persona_evidence: string[] | null;
       persona_status: "empty" | "draft" | "approved" | null;
       persona_last_analyzed_hot_count: number | null;
-    }>();
+    }>(),
+    supabaseAdmin
+      .from("identities")
+      .select("dna_axes, my_taboo, current_prophecy, dna_completeness")
+      .eq("user_id", scopedUserId)
+      .maybeSingle<{
+        dna_axes: { persona_keywords?: string[]; persona_summary?: string } | null;
+        my_taboo: { anti_persona?: string[]; ng_words?: string[] } | null;
+        current_prophecy: string | null;
+        dna_completeness: number | null;
+      }>(),
+  ]);
 
   if (error) {
     return DEFAULT_GHOST_SETTINGS;
   }
 
+  const identityKeywords = Array.isArray(identityRow?.dna_axes?.persona_keywords)
+    ? identityRow?.dna_axes?.persona_keywords
+    : [];
+  const identitySummary = identityRow?.dna_axes?.persona_summary ?? "";
+  const identityAntiPersona = Array.isArray(identityRow?.my_taboo?.anti_persona)
+    ? identityRow.my_taboo.anti_persona.map((item) => `anti_persona|${item}`)
+    : [];
+  const identityNgWords = Array.isArray(identityRow?.my_taboo?.ng_words) ? identityRow.my_taboo.ng_words : [];
+
   return {
     profileUrl: data.profile_url ?? "",
-    ngWords: data.ng_words ?? [],
+    ngWords: (data.ng_words ?? []).length > 0 ? data.ng_words ?? [] : identityNgWords,
     stylePrompt: data.style_prompt ?? "",
-    manualPosts: data.manual_posts ?? [],
-    personaKeywords: data.persona_keywords ?? [],
-    personaSummary: data.persona_summary ?? "",
+    manualPosts: (data.manual_posts ?? []).length > 0 ? data.manual_posts ?? [] : identityAntiPersona,
+    personaKeywords: (data.persona_keywords ?? []).length > 0 ? data.persona_keywords ?? [] : identityKeywords,
+    personaSummary: data.persona_summary ?? identitySummary,
     personaEvidence: data.persona_evidence ?? [],
     personaStatus: data.persona_status ?? "empty",
-    personaLastAnalyzedHotCount: data.persona_last_analyzed_hot_count ?? 0,
+    personaLastAnalyzedHotCount:
+      data.persona_last_analyzed_hot_count ?? Math.max(0, Math.floor((identityRow?.dna_completeness ?? 0) / 10)),
   };
 }
 
@@ -1443,10 +1871,7 @@ export async function saveGhostSettings(settings: GhostSettings, userId?: string
       profile_url: settings.profileUrl,
       ng_words: settings.ngWords,
       style_prompt: settings.stylePrompt,
-      manual_posts: settings.manualPosts,
-      persona_keywords: settings.personaKeywords,
-      persona_summary: settings.personaSummary,
-      persona_evidence: settings.personaEvidence,
+      // Legacy identity fields are intentionally not synced from app updates anymore.
       persona_status: settings.personaStatus,
       persona_last_analyzed_hot_count: settings.personaLastAnalyzedHotCount,
     },
@@ -1458,6 +1883,47 @@ export async function saveGhostSettings(settings: GhostSettings, userId?: string
   }
 
   return getGhostSettings(scopedUserId);
+}
+
+export async function getIdentityProfile(userId?: string): Promise<IdentityProfile> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const { data, error } = await supabaseAdmin
+    .from("identities")
+    .select("dna_axes, my_taboo, current_prophecy, dna_completeness, version")
+    .eq("user_id", scopedUserId)
+    .maybeSingle<{
+      dna_axes: Record<string, unknown> | null;
+      my_taboo: Record<string, unknown> | null;
+      current_prophecy: string | null;
+      dna_completeness: number | null;
+      version: number | null;
+    }>();
+
+  if (error || !data) return DEFAULT_IDENTITY_PROFILE;
+  return {
+    dnaAxes: data.dna_axes ?? {},
+    myTaboo: data.my_taboo ?? {},
+    currentProphecy: data.current_prophecy ?? "平均的な起業家",
+    dnaCompleteness: data.dna_completeness ?? 0,
+    version: data.version ?? 1,
+  };
+}
+
+export async function saveIdentityProfile(profile: IdentityProfile, userId?: string): Promise<IdentityProfile> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const { error } = await supabaseAdmin.from("identities").upsert(
+    {
+      user_id: scopedUserId,
+      dna_axes: profile.dnaAxes,
+      my_taboo: profile.myTaboo,
+      current_prophecy: profile.currentProphecy,
+      dna_completeness: profile.dnaCompleteness,
+      version: profile.version,
+    },
+    { onConflict: "user_id" },
+  );
+  if (error) throw error;
+  return getIdentityProfile(scopedUserId);
 }
 
 export async function getCreditSummary(userId?: string): Promise<CreditSummary> {
