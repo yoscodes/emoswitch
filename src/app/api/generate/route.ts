@@ -3,6 +3,7 @@ import { streamText } from "ai";
 import { z } from "zod";
 
 import { EMOTION_LABELS, EMOTION_PROMPTS, type EmotionTone } from "@/lib/emotions";
+import { getDailyGenerationUsage, resolveBillingState, resolveRequestActor } from "@/lib/supabase/services";
 
 export const runtime = "edge";
 
@@ -14,8 +15,23 @@ const bodySchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const actor = await resolveRequestActor(request);
+    const billing = await resolveBillingState(actor.userId);
+    const dailyUsage = await getDailyGenerationUsage(actor.userId);
+    if (!billing.isUnlimited && dailyUsage >= 3) {
+      return Response.json(
+        { error: "無料プランの本日の生成上限（3回）に達しました。プランをアップグレードしてください。" },
+        { status: 402 },
+      );
+    }
     const json = await request.json();
     const { draft, emotion, speedMode } = bodySchema.parse(json);
+    if (speedMode === "pro" && !billing.aiWallDeepEnabled) {
+      return Response.json(
+        { error: "ディープ解析（Pro）は有料プランで利用できます。" },
+        { status: 402 },
+      );
+    }
     const modelName =
       speedMode === "pro" ? "gemini-1.5-pro-latest" : "gemini-1.5-flash-latest";
 

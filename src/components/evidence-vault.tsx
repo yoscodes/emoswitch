@@ -211,88 +211,47 @@ function QuickFeedbackPicker({
   );
 }
 
-function InsightsDashboard({
+function MarketInsightBanner({
   overview,
-  compact = false,
   onApplyInsight,
 }: {
   overview: ArchiveOverview;
-  compact?: boolean;
   onApplyInsight?: () => void;
 }) {
-  const maxUsage = Math.max(...overview.insights.emotionBreakdown.map((entry) => entry.usageCount), 1);
-  const totalSwitches = overview.insights.totalSingles + overview.insights.totalSeries;
   const canApplyInsight =
     overview.insights.recommendedEmotion != null && overview.insights.recommendedIntensity != null;
+  const totalSwitches = overview.insights.totalSingles + overview.insights.totalSeries;
+  const topEmotion = [...overview.insights.emotionBreakdown].sort((a, b) => b.hotRate - a.hotRate)[0] ?? null;
 
   return (
-    <section className={cn("space-y-4", compact && "space-y-3")}>
-      <Card className="border border-amber-200/70 bg-amber-50/70 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20">
-        <CardHeader className={cn("space-y-2 pb-2", compact && "space-y-1.5 px-4 pt-4 pb-1")}>
+    <Card className="border border-amber-200/70 bg-linear-to-r from-amber-50/90 via-background to-violet-50/60 shadow-sm dark:border-amber-900/50 dark:from-amber-950/20 dark:to-violet-950/10">
+      <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-2">
           <div className="flex items-center gap-2">
             <BarChart3 className="size-4 text-amber-600 dark:text-amber-300" />
-            <h2 className={cn("text-base font-semibold", compact && "text-sm")}>Market Insight</h2>
+            <p className="text-sm font-semibold">現在の検証サマリー</p>
           </div>
-          <p className={cn("text-sm text-muted-foreground", compact && "text-xs leading-5")}>
-            どの見せ方で事業仮説が刺さるかを、市場反応ベースで言語化して返します。
-          </p>
-        </CardHeader>
-        <CardContent className={cn("space-y-2 p-5 pt-2", compact && "space-y-1.5 px-4 pb-4 pt-1")}>
-          <p className={cn("text-sm leading-7 text-foreground", compact && "text-xs leading-6")}>
-            {overview.insights.bestPatternSummary}
-          </p>
+          <p className="text-sm leading-7 text-foreground">{overview.insights.bestPatternSummary}</p>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant="outline" className="rounded-full">
+              総検証数 {totalSwitches}
+            </Badge>
+            {topEmotion ? (
+              <Badge variant="outline" className="rounded-full">
+                最高反応 {topEmotion.label} / 🔥率 {topEmotion.hotRate}%
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+        <div className="shrink-0">
           {canApplyInsight ? (
-            <Button
-              type="button"
-              size={compact ? "sm" : "default"}
-              className="mt-1 w-full rounded-full"
-              onClick={onApplyInsight}
-            >
-              この仮説で次を作る
+            <Button type="button" className="w-full rounded-full md:w-auto" onClick={onApplyInsight}>
+              生成する
             </Button>
           ) : null}
-        </CardContent>
-      </Card>
-
-      <Card className="border border-slate-200/70 bg-slate-50/70 shadow-sm dark:border-slate-800/70 dark:bg-slate-950/20">
-        <CardHeader className={cn("space-y-2 pb-2", compact && "space-y-1.5 px-4 pt-4 pb-1")}>
-          <div className="flex items-center gap-2">
-            <BarChart3 className="size-4 text-primary" />
-            <h2 className={cn("text-base font-semibold", compact && "text-sm")}>見せ方分布</h2>
-          </div>
-          <p className={cn("text-sm text-muted-foreground", compact && "text-xs leading-5")}>
-            どの見せ方を多く試したかと、どの見せ方が反応されやすかったかを並べて見ます。
-          </p>
-        </CardHeader>
-        <CardContent className={cn("space-y-4", compact && "space-y-3 px-4 pb-4")}>
-          {overview.insights.emotionBreakdown.map((entry) => (
-            <div key={entry.emotion} className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className={cn("rounded-full", compact && "px-2 py-0.5 text-[11px]")}>
-                    {entry.label}
-                  </Badge>
-                  <span className={cn("text-sm text-muted-foreground", compact && "text-xs")}>使用 {entry.usageCount}回</span>
-                </div>
-                <span className={cn("text-sm font-medium", compact && "text-xs")}>🔥率 {entry.hotRate}%</span>
-              </div>
-              <div className={cn("h-2 overflow-hidden rounded-full bg-muted", compact && "h-1.5")}>
-                <div
-                  className="h-full rounded-full bg-primary transition-[width]"
-                  style={{ width: `${(entry.usageCount / maxUsage) * 100}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <div className="px-1">
-        <p className={cn("text-xs text-muted-foreground", compact && "text-[11px]")}>
-          これまで {totalSwitches}回の仮説検証を記録しました。
-        </p>
-      </div>
-    </section>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -301,7 +260,6 @@ export function EvidenceVault() {
   const [overview, setOverview] = useState<ArchiveOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [insightsOpen, setInsightsOpen] = useState(false);
   const [filter, setFilter] = useState<QuickFeedback | "all">("all");
   const [modeFilter, setModeFilter] = useState<"all" | "single" | "series">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -318,7 +276,7 @@ export function EvidenceVault() {
     try {
       setOverview(await fetchArchiveOverview());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "反応データの取得に失敗しました");
+      setError(e instanceof Error ? e.message : "保存に失敗しました。");
     } finally {
       setLoading(false);
     }
@@ -339,14 +297,10 @@ export function EvidenceVault() {
     setSeedError(null);
     try {
       const result = await seedArchiveSampleData();
-      setSeedStatus(
-        result.insertedCount > 0
-          ? `${result.insertedCount}件のサンプル反応ログを追加しました。`
-          : "既に履歴があるため、サンプル反応ログの追加はスキップしました。",
-      );
+      setSeedStatus("保存しました。");
       await refresh();
     } catch (e) {
-      setSeedError(e instanceof Error ? e.message : "サンプル反応ログの追加に失敗しました");
+      setSeedError(e instanceof Error ? e.message : "保存に失敗しました。");
     } finally {
       setSeeding(false);
     }
@@ -400,8 +354,6 @@ export function EvidenceVault() {
       return sortBy === "oldest" ? aTime - bTime : bTime - aTime;
     });
   }, [dateRange, filter, modeFilter, overview?.entries, searchQuery, sortBy]);
-  const selectedEntry = entries.find((entry) => entry.id === selectedEntryId) ?? entries[0] ?? null;
-
   useEffect(() => {
     if (entries.length === 0) {
       setSelectedEntryId(null);
@@ -513,7 +465,7 @@ export function EvidenceVault() {
           <p className="text-xs font-semibold tracking-wide text-muted-foreground">FILTER / CONTROL</p>
           {filterToolbar}
           <Button type="button" variant="outline" onClick={() => void handleSeedSamples()} disabled={seeding} className="w-full">
-            {seeding ? "サンプル反応ログを追加中..." : "サンプルログを入れる"}
+            {seeding ? "保存中..." : "保存する"}
           </Button>
           {seedStatus ? <p className="text-xs text-emerald-600">{seedStatus}</p> : null}
           {seedError ? <p className="text-xs text-destructive">{seedError}</p> : null}
@@ -521,38 +473,6 @@ export function EvidenceVault() {
       </Card>
     </section>
   );
-
-  const rightColumn = overview ? (
-    <section className="space-y-4 lg:sticky lg:top-24">
-      <Card className="border border-violet-200/60 bg-violet-50/45 dark:border-violet-900/40 dark:bg-violet-950/15">
-        <CardContent className="space-y-3 p-4">
-          <p className="text-xs font-semibold tracking-wide text-muted-foreground">DETAIL PREVIEW</p>
-          {selectedEntry ? (
-            <>
-              <div className="flex flex-wrap gap-1.5">
-                {getIdentityTags(selectedEntry).map((tag) => (
-                  <Badge key={`${selectedEntry.id}-${tag}`} variant="secondary" className="rounded-full text-[11px]">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-              <p className="text-sm leading-6 text-foreground">
-                {selectedEntry.generationMode === "series" ? selectedEntry.title : selectedEntry.variants[selectedEntry.selectedIndex ?? 0] ?? selectedEntry.draft}
-              </p>
-              <p className="text-xs text-muted-foreground">{formatDate(selectedEntry.createdAt)}</p>
-              <Button type="button" onClick={() => handleReseedEntry(selectedEntry)} className="w-full gap-2">
-                <Wand2 className="size-3.5" />
-                Re-seedしてLabへ戻る
-              </Button>
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">リストからログを選ぶと、ここで詳細を再播種できます。</p>
-          )}
-        </CardContent>
-      </Card>
-      <InsightsDashboard overview={overview} compact onApplyInsight={handleApplyInsight} />
-    </section>
-  ) : null;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 pb-28 md:px-6">
@@ -569,37 +489,19 @@ export function EvidenceVault() {
           <CardContent className="py-12 text-center text-sm text-destructive">{error}</CardContent>
         </Card>
       ) : overview == null ? null : (
-        <div className="grid gap-6 lg:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.7fr)_minmax(280px,0.95fr)]">
+        <div className="grid gap-6 lg:grid-cols-[minmax(240px,0.9fr)_minmax(0,2.1fr)]">
           <div>{leftColumn}</div>
           <div className="min-w-0 space-y-6">
             <header className="space-y-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-2">
-                  <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Evidence Vault</h1>
-                  <p className="text-muted-foreground">
-                    ここは情報のストック場所です。過去ログを資産化し、次の検証に再投入します。
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setInsightsOpen((current) => !current)}
-                  className="gap-2 lg:hidden"
-                >
-                  <BarChart3 className="size-4" />
-                  {insightsOpen ? "インサイトを隠す" : "インサイトを表示"}
-                  <ChevronDown className={cn("size-3.5 transition-transform", insightsOpen && "rotate-180")} />
-                </Button>
+              <div className="space-y-2">
+                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Evidence Vault</h1>
+                <p className="text-muted-foreground">
+                  ここは情報のストック場所です。過去ログを資産化し、次の検証に再投入します。
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">反応の蓄積、傾向把握、Re-seedまでを1ページで回します。</p>
+              <p className="text-xs text-muted-foreground">保存して、生成して、戻る流れを1ページで回します。</p>
             </header>
-
-            {insightsOpen ? (
-              <div className="lg:hidden">
-                <InsightsDashboard overview={overview} onApplyInsight={handleApplyInsight} />
-              </div>
-            ) : null}
+            <MarketInsightBanner overview={overview} onApplyInsight={handleApplyInsight} />
 
             {entries.length === 0 ? (
               <Card>
@@ -608,7 +510,7 @@ export function EvidenceVault() {
                     <p>
                       まだ反応ログがありません。
                       <Link href="/lab" className="px-1 font-medium text-primary underline-offset-4 hover:underline">
-                        Seed Workspace
+                        戻る
                       </Link>
                       で仮説を生成すると、ここが市場反応の司令塔として育ちます。
                     </p>
@@ -643,7 +545,6 @@ export function EvidenceVault() {
               </ul>
             )}
           </div>
-          <div>{rightColumn}</div>
         </div>
       )}
     </div>
@@ -754,38 +655,18 @@ function ArchiveSingleRow({
               "未選択"
             )}
           </Badge>
-          <div className="rounded-3xl border-2 border-emerald-300 bg-emerald-50/50 p-6 shadow-sm">
-            <p className="text-lg leading-8 text-foreground md:text-xl">
+          <div className={cn("rounded-3xl border-2 border-emerald-300 bg-emerald-50/50 p-5 shadow-sm", !selected && "p-4")}>
+            <p className={cn("leading-8 text-foreground md:text-xl", selected ? "text-lg" : "line-clamp-2 text-sm leading-6")}>
               {adoptedBody ?? "まだ採用した仮説が選ばれていません。"}
             </p>
           </div>
         </section>
-
-        <section className="border-t border-dashed pt-4">
-          <p className="text-xs font-medium text-muted-foreground">元の種メモ</p>
-          <div className="mt-2 rounded-2xl border border-border/40 bg-muted/20 px-4 py-3">
-            <p className="border-l-2 border-muted-foreground/20 pl-3 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
-              {row.draft}
-            </p>
-          </div>
-        </section>
-
-        {row.memoryTags && row.memoryTags.length > 0 ? (
-          <section className="flex flex-wrap gap-2 border-t border-dashed pt-4">
-            {row.memoryTags.map((tag) => (
-              <Badge key={tag} variant="secondary" className="rounded-full">
-                {tag}
-              </Badge>
-            ))}
-          </section>
-        ) : null}
-
         <section className="flex flex-wrap items-center gap-2 border-t border-dashed pt-4">
           <QuickFeedbackPicker value={quickFeedback} saving={feedbackSaving} onChange={saveQuickFeedback} />
           <Button type="button" size="sm" variant="outline" onClick={handleReuseSettings} className="gap-2 text-xs">
             <Wand2 className="size-3.5" />
-            <span className="hidden sm:inline">Re-seed（再播種）</span>
-            <span className="sm:hidden">Re-seed</span>
+            <span className="hidden sm:inline">戻る</span>
+            <span className="sm:hidden">戻る</span>
           </Button>
           <Button
             type="button"
@@ -802,7 +683,10 @@ function ArchiveSingleRow({
             type="button"
             size="sm"
             variant="ghost"
-            onClick={() => setOthersOpen((open) => !open)}
+            onClick={(event) => {
+              event.stopPropagation();
+              setOthersOpen((open) => !open);
+            }}
             className="gap-2 text-xs"
             aria-label={othersOpen ? "他案を閉じる" : "他案を見る"}
           >
@@ -811,7 +695,29 @@ function ArchiveSingleRow({
           </Button>
         </section>
 
-        {othersOpen ? (
+        {selected ? (
+          <section className="space-y-4 border-t border-dashed pt-4">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">元の種メモ</p>
+              <div className="mt-2 rounded-2xl border border-border/40 bg-muted/20 px-4 py-3">
+                <p className="border-l-2 border-muted-foreground/20 pl-3 text-sm leading-relaxed text-muted-foreground">
+                  {row.draft}
+                </p>
+              </div>
+            </div>
+            {row.memoryTags && row.memoryTags.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {row.memoryTags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="rounded-full">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {selected && othersOpen ? (
           <section className="grid gap-3 border-t border-dashed pt-4 md:grid-cols-2">
             {otherVariants.length > 0 ? (
               otherVariants.map((variant, index) => (
@@ -1029,7 +935,9 @@ function ArchiveSeriesRow({
                 </div>
                 <span className="text-xs text-muted-foreground">最新の検証フェーズ</span>
               </div>
-              <p className="text-sm leading-7 text-foreground">{latestItem.body}</p>
+              <p className={cn("text-foreground", selected ? "text-sm leading-7" : "line-clamp-2 text-sm leading-6")}>
+                {latestItem.body}
+              </p>
               <div className="flex flex-wrap gap-2">
                 {latestItem.hashtags.map((tag) => (
                   <Badge key={`${latestItem.id}-${tag}`} variant="outline" className="rounded-full text-[11px]">
@@ -1051,14 +959,17 @@ function ArchiveSeriesRow({
               className="gap-2 text-xs"
             >
               <Wand2 className="size-3.5" />
-              <span className="hidden sm:inline">Re-seed（再播種）</span>
-              <span className="sm:hidden">Re-seed</span>
+              <span className="hidden sm:inline">戻る</span>
+              <span className="sm:hidden">戻る</span>
             </Button>
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              onClick={() => setOpen((current) => !current)}
+              onClick={(event) => {
+                event.stopPropagation();
+                setOpen((current) => !current);
+              }}
               className="gap-2 text-xs"
               aria-label={open ? "ロードマップを閉じる" : "ロードマップを展開する"}
             >
@@ -1067,7 +978,7 @@ function ArchiveSeriesRow({
             </Button>
           </div>
 
-          {open ? (
+          {selected && open ? (
             <section className="grid gap-3 border-t border-dashed pt-4 md:grid-cols-3">
               {row.items.map((item) => (
                 <SeriesItemCard key={item.id} item={item} onUpdate={onUpdate} />

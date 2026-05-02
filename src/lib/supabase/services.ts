@@ -462,6 +462,15 @@ type DbProfileRow = {
   default_emotion: EmotionTone;
   writing_style: "polite" | "casual" | "passionate";
   sentence_style: "desumasu" | "friendly";
+  plan_tier: "free" | "basic" | "creator" | "pro";
+  subscription_tier: "free" | "basic" | "creator" | "pro";
+  ai_wall_deep_enabled: boolean;
+};
+
+type DbSubscriptionRow = {
+  status: string;
+  plan_tier: "free" | "basic" | "creator" | "pro";
+  subscription_tier: "free" | "basic" | "creator" | "pro";
 };
 
 function isoDaysAgo(days: number): string {
@@ -666,7 +675,9 @@ function getUserDisplayName(user: User): string | null {
 async function requireProfileRow(userId: string): Promise<DbProfileRow> {
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .select("id, email, display_name, default_emotion, writing_style, sentence_style")
+    .select(
+      "id, email, display_name, default_emotion, writing_style, sentence_style, plan_tier, subscription_tier, ai_wall_deep_enabled",
+    )
     .eq("id", userId)
     .single<DbProfileRow>();
 
@@ -675,6 +686,112 @@ async function requireProfileRow(userId: string): Promise<DbProfileRow> {
   }
 
   return data;
+}
+
+function normalizePlanTier(value: string | null | undefined): "free" | "basic" | "creator" | "pro" {
+  if (value === "basic" || value === "creator" || value === "pro") return value;
+  return "free";
+}
+
+function hasUnlimitedAccess(planTier: "free" | "basic" | "creator" | "pro"): boolean {
+  return planTier !== "free";
+}
+
+function resolveRootsSyncPriority(planTier: "free" | "basic" | "creator" | "pro"): "standard" | "high" {
+  return planTier === "creator" || planTier === "pro" ? "high" : "standard";
+}
+
+function canUseSurvivalSimulation(planTier: "free" | "basic" | "creator" | "pro"): boolean {
+  return planTier === "pro";
+}
+
+export async function resolveBillingState(userId?: string): Promise<{
+  planTier: "free" | "basic" | "creator" | "pro";
+  subscriptionTier: "free" | "basic" | "creator" | "pro";
+  aiWallDeepEnabled: boolean;
+  isUnlimited: boolean;
+  rootsSyncPriority: "standard" | "high";
+  survivalSimulationEnabled: boolean;
+}> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const [{ data: profile, error: profileError }, { data: subscriptions, error: subscriptionsError }] = await Promise.all([
+    supabaseAdmin
+      .from("profiles")
+      .select("plan_tier, subscription_tier, ai_wall_deep_enabled")
+      .eq("id", scopedUserId)
+      .single<{
+        plan_tier: "free" | "basic" | "creator" | "pro" | null;
+        subscription_tier: "free" | "basic" | "creator" | "pro" | null;
+        ai_wall_deep_enabled: boolean | null;
+      }>(),
+    supabaseAdmin
+      .from("subscriptions")
+      .select("status, plan_tier, subscription_tier")
+      .eq("user_id", scopedUserId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .overrideTypes<DbSubscriptionRow[]>(),
+  ]);
+  if (profileError) throw profileError;
+  if (subscriptionsError) throw subscriptionsError;
+
+  const latestSub = subscriptions?.[0];
+  const subActive = latestSub != null && (latestSub.status === "active" || latestSub.status === "trialing");
+  const subscriptionTier = subActive
+    ? normalizePlanTier(latestSub.subscription_tier ?? latestSub.plan_tier)
+    : normalizePlanTier(profile.subscription_tier ?? profile.plan_tier);
+  const planTier = subActive ? normalizePlanTier(latestSub.plan_tier) : normalizePlanTier(profile.plan_tier);
+  const aiWallDeepEnabled = Boolean(profile.ai_wall_deep_enabled) || hasUnlimitedAccess(planTier);
+
+  return {
+    planTier,
+    subscriptionTier,
+    aiWallDeepEnabled,
+    isUnlimited: hasUnlimitedAccess(planTier),
+    rootsSyncPriority: resolveRootsSyncPriority(subscriptionTier),
+    survivalSimulationEnabled: canUseSurvivalSimulation(subscriptionTier),
+  };
+}
+
+export async function getDailyGenerationUsage(userId?: string): Promise<number> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  const from = start.toISOString();
+  const to = end.toISOString();
+
+  const { count, error } = await supabaseAdmin
+    .from("hypotheses")
+    .select("id", { head: true, count: "exact" })
+    .eq("user_id", scopedUserId)
+    .neq("status", "draft")
+    .is("deleted_at", null)
+    .gte("created_at", from)
+    .lt("created_at", to);
+  if (error) throw error;
+  if ((count ?? 0) > 0) return count ?? 0;
+
+  const [{ count: singleCount, error: singleError }, { count: seriesCount, error: seriesError }] = await Promise.all([
+    supabaseAdmin
+      .from("generations")
+      .select("id", { head: true, count: "exact" })
+      .eq("user_id", scopedUserId)
+      .is("deleted_at", null)
+      .gte("created_at", from)
+      .lt("created_at", to),
+    supabaseAdmin
+      .from("generation_series")
+      .select("id", { head: true, count: "exact" })
+      .eq("user_id", scopedUserId)
+      .is("deleted_at", null)
+      .gte("created_at", from)
+      .lt("created_at", to),
+  ]);
+  if (singleError) throw singleError;
+  if (seriesError) throw seriesError;
+  return (singleCount ?? 0) + (seriesCount ?? 0);
 }
 
 function getBearerToken(request: Request): string | null {
@@ -1301,10 +1418,14 @@ async function resolveScopedUserId(userId?: string): Promise<string> {
   return userId ?? (await ensureDemoUser());
 }
 
-export async function listGenerations(userId?: string): Promise<GenerationRecord[]> {
+export async function listGenerations(
+  userId?: string,
+  options?: { pivotOnly?: boolean },
+): Promise<GenerationRecord[]> {
   const scopedUserId = await resolveScopedUserId(userId);
+  const pivotOnly = options?.pivotOnly ?? false;
   const coverage = await getSchemaCoverage(scopedUserId);
-  const { data: hypothesisRows, error: hypothesisError } = await supabaseAdmin
+  const singleQuery = supabaseAdmin
     .from("hypotheses")
     .select(
       "id, user_id, generation_mode, seed_input, strategy_params, output_content, status, created_at, updated_at, deleted_at",
@@ -1312,7 +1433,11 @@ export async function listGenerations(userId?: string): Promise<GenerationRecord
     .eq("user_id", scopedUserId)
     .eq("generation_mode", "single")
     .neq("status", "draft")
-    .is("deleted_at", null)
+    .is("deleted_at", null);
+  if (pivotOnly) {
+    singleQuery.is("legacy_source_type", null);
+  }
+  const { data: hypothesisRows, error: hypothesisError } = await singleQuery
     .order("created_at", { ascending: false })
     .overrideTypes<DbHypothesisRow[]>();
 
@@ -1331,7 +1456,7 @@ export async function listGenerations(userId?: string): Promise<GenerationRecord
     return hypothesisRows.map((row) => mapSingleFromHypothesis(row, grouped.get(row.id) ?? []));
   }
 
-  if (!coverage.useLegacyFallback) {
+  if (pivotOnly || !coverage.useLegacyFallback) {
     return [];
   }
 
@@ -1349,10 +1474,14 @@ export async function listGenerations(userId?: string): Promise<GenerationRecord
   return data.map((row) => mapGeneration(row as DbGenerationRow));
 }
 
-export async function listGenerationSeries(userId?: string): Promise<GenerationSeriesRecord[]> {
+export async function listGenerationSeries(
+  userId?: string,
+  options?: { pivotOnly?: boolean },
+): Promise<GenerationSeriesRecord[]> {
   const scopedUserId = await resolveScopedUserId(userId);
+  const pivotOnly = options?.pivotOnly ?? false;
   const coverage = await getSchemaCoverage(scopedUserId);
-  const { data: hypothesisRows, error: hypothesisError } = await supabaseAdmin
+  const seriesQuery = supabaseAdmin
     .from("hypotheses")
     .select(
       "id, user_id, generation_mode, seed_input, strategy_params, output_content, status, created_at, updated_at, deleted_at",
@@ -1360,7 +1489,11 @@ export async function listGenerationSeries(userId?: string): Promise<GenerationS
     .eq("user_id", scopedUserId)
     .eq("generation_mode", "series")
     .neq("status", "draft")
-    .is("deleted_at", null)
+    .is("deleted_at", null);
+  if (pivotOnly) {
+    seriesQuery.is("legacy_source_type", null);
+  }
+  const { data: hypothesisRows, error: hypothesisError } = await seriesQuery
     .order("created_at", { ascending: false })
     .overrideTypes<DbHypothesisRow[]>();
 
@@ -1379,7 +1512,7 @@ export async function listGenerationSeries(userId?: string): Promise<GenerationS
     return hypothesisRows.map((row) => mapSeriesFromHypothesis(row, grouped.get(row.id) ?? []));
   }
 
-  if (!coverage.useLegacyFallback) {
+  if (pivotOnly || !coverage.useLegacyFallback) {
     return [];
   }
 
@@ -1421,21 +1554,29 @@ export async function getArchiveOverview(userId?: string): Promise<ArchiveOvervi
 
 export async function getArchiveOverviewWithOptions(
   userId?: string,
-  options?: { includeEntries?: boolean },
+  options?: { includeEntries?: boolean; pivotOnly?: boolean },
 ): Promise<ArchiveOverview> {
   const scopedUserId = await resolveScopedUserId(userId);
   await runPeriodicLegacyBackfill(scopedUserId);
   const includeEntries = options?.includeEntries ?? true;
-  const cacheKey = `${scopedUserId}:${includeEntries ? "full" : "summary"}`;
+  const pivotOnly = options?.pivotOnly ?? false;
+  const cacheKey = `${scopedUserId}:${includeEntries ? "full" : "summary"}:${pivotOnly ? "pivot" : "all"}`;
   const cached = archiveOverviewCache.get(cacheKey);
 
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
 
+  const listSingles = async () => {
+    return listGenerations(scopedUserId, { pivotOnly });
+  };
+  const listSeries = async () => {
+    return listGenerationSeries(scopedUserId, { pivotOnly });
+  };
+
   const overview = includeEntries
     ? await (async () => {
-        const [entries, series] = await Promise.all([listGenerations(scopedUserId), listGenerationSeries(scopedUserId)]);
+        const [entries, series] = await Promise.all([listSingles(), listSeries()]);
         const singles = entries.filter((entry) => entry.generationMode === "single");
         const allEntries = [...singles, ...series].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
@@ -1445,7 +1586,7 @@ export async function getArchiveOverviewWithOptions(
         } satisfies ArchiveOverview;
       })()
     : await (async () => {
-        const [entries, seriesRows] = await Promise.all([listGenerations(scopedUserId), listGenerationSeries(scopedUserId)]);
+        const [entries, seriesRows] = await Promise.all([listSingles(), listSeries()]);
         const singles: ArchiveInsightSingleInput[] = entries.map((row) => ({
           emotion: row.emotion,
           intensity: row.intensity,
@@ -1928,20 +2069,32 @@ export async function saveIdentityProfile(profile: IdentityProfile, userId?: str
 
 export async function getCreditSummary(userId?: string): Promise<CreditSummary> {
   const scopedUserId = await resolveScopedUserId(userId);
-  const { data, error } = await supabaseAdmin.rpc("get_credit_summary", {
-    p_user_id: scopedUserId,
-  });
+  const [{ data, error }, billing, dailyUsed] = await Promise.all([
+    supabaseAdmin.rpc("get_credit_summary", {
+      p_user_id: scopedUserId,
+    }),
+    resolveBillingState(scopedUserId),
+    getDailyGenerationUsage(scopedUserId),
+  ]);
 
   if (error) {
     throw error;
   }
 
   const row = Array.isArray(data) ? data[0] : data;
+  const dailyLimit = billing.isUnlimited ? null : 3;
 
   return {
     remaining: Number(row?.remaining ?? 0),
     used: Number(row?.used ?? 0),
     granted: Number(row?.granted ?? 0),
+    dailyUsed,
+    dailyLimit,
+    isUnlimited: billing.isUnlimited,
+    planTier: billing.planTier,
+    aiWallDeepEnabled: billing.aiWallDeepEnabled,
+    rootsSyncPriority: billing.rootsSyncPriority,
+    survivalSimulationEnabled: billing.survivalSimulationEnabled,
   };
 }
 
@@ -1957,7 +2110,14 @@ export async function getUserProfile(user: User, userId?: string): Promise<UserP
       typeof user.user_metadata?.avatar_url === "string" && user.user_metadata.avatar_url !== ""
         ? user.user_metadata.avatar_url
         : null,
-    planName: "無料",
+    planName:
+      row.subscription_tier === "pro"
+        ? "プロ"
+        : row.subscription_tier === "creator"
+          ? "クリエイター"
+          : row.subscription_tier === "basic"
+            ? "ベーシック"
+            : "無料",
     defaultEmotion: row.default_emotion ?? "empathy",
     writingStyle: row.writing_style ?? "casual",
     sentenceStyle: row.sentence_style ?? "friendly",

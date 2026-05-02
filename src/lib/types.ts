@@ -117,6 +117,13 @@ export type CreditSummary = {
   remaining: number;
   used: number;
   granted: number;
+  dailyUsed: number;
+  dailyLimit: number | null;
+  isUnlimited: boolean;
+  planTier: "free" | "basic" | "creator" | "pro";
+  aiWallDeepEnabled: boolean;
+  rootsSyncPriority: "standard" | "high";
+  survivalSimulationEnabled: boolean;
 };
 
 export type UserProfileSettings = {

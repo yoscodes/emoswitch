@@ -40,7 +40,7 @@ export function IdentityGhostWorkspace() {
         setNgWordsInput((settings.ngWords ?? []).join("\n"));
       } catch (e) {
         if (!active) return;
-        setError(e instanceof Error ? e.message : "Ghost設定の取得に失敗しました。");
+        setError(e instanceof Error ? e.message : "保存に失敗しました。");
       } finally {
         if (active) setLoading(false);
       }
@@ -65,9 +65,9 @@ export function IdentityGhostWorkspace() {
         stylePrompt: stylePrompt.trim(),
         ngWords,
       });
-      setStatus("Ghost設定を保存しました。");
+      setStatus("保存しました。");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ghost設定の保存に失敗しました。");
+      setError(e instanceof Error ? e.message : "保存に失敗しました。");
     } finally {
       setSaving(false);
     }
@@ -122,10 +122,10 @@ export function IdentityGhostWorkspace() {
 
           <div className="flex flex-wrap items-center gap-2 pt-2">
             <Button type="button" onClick={() => void handleSave()} disabled={!canSave}>
-              {saving ? "保存中..." : "Ghost設定を保存"}
+              {saving ? "保存中..." : "保存する"}
             </Button>
             <Link href="/identity" className={cn(buttonVariants({ variant: "ghost" }))}>
-              Identity Labへ戻る
+              戻る
             </Link>
           </div>
           {status ? <p className="text-sm text-emerald-600">{status}</p> : null}

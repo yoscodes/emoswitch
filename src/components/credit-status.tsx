@@ -15,14 +15,14 @@ export function CreditStatus({
   className?: string;
   compact?: boolean;
 }) {
-  const [remaining, setRemaining] = useState<number | null>(null);
+  const [remainingLabel, setRemainingLabel] = useState<string>("...");
 
   const refresh = useCallback(async () => {
     try {
       const summary = await fetchCreditSummary();
-      setRemaining(summary.remaining);
+      setRemainingLabel(summary.isUnlimited ? "無制限" : `${summary.remaining}回`);
     } catch {
-      setRemaining(null);
+      setRemainingLabel("...");
     }
   }, []);
 
@@ -31,12 +31,12 @@ export function CreditStatus({
     void fetchCreditSummary()
       .then((summary) => {
         if (active) {
-          setRemaining(summary.remaining);
+          setRemainingLabel(summary.isUnlimited ? "無制限" : `${summary.remaining}回`);
         }
       })
       .catch(() => {
         if (active) {
-          setRemaining(null);
+          setRemainingLabel("...");
         }
       });
 
@@ -64,7 +64,7 @@ export function CreditStatus({
         </span>
         <span className="whitespace-nowrap text-muted-foreground">
           {!compact ? "残り " : ""}
-          <span className="font-semibold text-foreground">{remaining == null ? "..." : `${remaining}回`}</span>
+          <span className="font-semibold text-foreground">{remainingLabel}</span>
         </span>
       </div>
       <Link

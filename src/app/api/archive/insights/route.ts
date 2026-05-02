@@ -6,6 +6,7 @@ export async function GET(request: Request) {
     const summaryOnly = new URL(request.url).searchParams.get("summaryOnly") === "1";
     const overview = await getArchiveOverviewWithOptions(actor.userId, {
       includeEntries: !summaryOnly,
+      pivotOnly: true,
     });
     return Response.json(overview);
   } catch (error) {

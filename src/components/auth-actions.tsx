@@ -36,7 +36,7 @@ export function AuthActions({ compact = false, className }: AuthActionsProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  const [remaining, setRemaining] = useState<number | null>(null);
+  const [remainingLabel, setRemainingLabel] = useState<string>("読み込み中...");
   const [displayNameOverride, setDisplayNameOverride] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -90,12 +90,12 @@ export function AuthActions({ compact = false, className }: AuthActionsProps) {
     void fetchCreditSummary()
       .then((summary) => {
         if (active) {
-          setRemaining(summary.remaining);
+          setRemainingLabel(summary.isUnlimited ? "無制限" : `${summary.remaining}回`);
         }
       })
       .catch(() => {
         if (active) {
-          setRemaining(null);
+          setRemainingLabel("読み込み失敗");
         }
       });
 
@@ -237,7 +237,7 @@ export function AuthActions({ compact = false, className }: AuthActionsProps) {
               </div>
               <div className="mt-3 rounded-full border bg-background/85 px-3 py-2 text-sm">
                 <p className="text-xs text-muted-foreground">現在の残りクレジット</p>
-                <p className="mt-1 font-semibold">{remaining == null ? "読み込み中..." : `${remaining}回`}</p>
+                <p className="mt-1 font-semibold">{remainingLabel}</p>
               </div>
             </div>
 

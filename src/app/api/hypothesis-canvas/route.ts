@@ -2,7 +2,7 @@ import { google } from "@ai-sdk/google";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { buildIdentityPromptBlock, buildShredderPromptBlock } from "@/lib/identity-prompt";
-import { getIdentityProfile, resolveRequestActor } from "@/lib/supabase/services";
+import { getIdentityProfile, resolveBillingState, resolveRequestActor } from "@/lib/supabase/services";
 
 export const runtime = "edge";
 
@@ -15,7 +15,25 @@ const bodySchema = z.object({
   personaKeywords: z.array(z.string()).optional().default([]),
   personaSummary: z.string().optional().default(""),
   strategyLabel: z.string().optional().default(""),
+  usagePurpose: z
+    .enum(["discovery", "blueprint", "refinement", "communication"])
+    .optional()
+    .default("discovery"),
 });
+
+const USAGE_PURPOSE_HINTS = {
+  discovery: "ユーザーは発想の種を増やしたい。DNA一致率は厳しすぎず、探索余地を残す評価に寄せる。",
+  blueprint: "ユーザーはコンセプトの芯を固めたい。DNAとの整合とストーリーの一貫性を重視する。",
+  refinement: "ユーザーは仮説を圧縮したい。DNAとのズレや前提の穴を厳しめに検出する。",
+  communication: "ユーザーは一言の打ち力を求めている。短いコピー前提でDNAのトーンとの一致を見る。",
+} as const;
+
+const USAGE_PURPOSE_LABELS = {
+  discovery: "探索（Discovery）",
+  blueprint: "構築（Blueprint）",
+  refinement: "研磨（Refinement）",
+  communication: "伝達（Communication）",
+} as const;
 
 const canvasSchema = z.object({
   summary: z.string().min(18).max(90),
@@ -29,6 +47,7 @@ const canvasSchema = z.object({
 export async function POST(request: Request) {
   try {
     const actor = await resolveRequestActor(request);
+    const billing = await resolveBillingState(actor.userId);
     const {
       draft,
       refinementAnswer,
@@ -38,6 +57,7 @@ export async function POST(request: Request) {
       personaKeywords,
       personaSummary,
       strategyLabel,
+      usagePurpose,
     } = bodySchema.parse(await request.json());
     const identity = await getIdentityProfile(actor.userId);
 
@@ -63,6 +83,9 @@ export async function POST(request: Request) {
         : "ペルソナ情報なし";
     const identityBlock = buildIdentityPromptBlock(identity);
     const shredderBlock = buildShredderPromptBlock(draft, identity.myTaboo);
+    const survivalSimulationPrompt = billing.survivalSimulationEnabled
+      ? "Proユーザーなので、生存シミュレーション観点（資金消耗、心理コスト、実行持続性）を質問設計に必ず含める。"
+      : "生存シミュレーション観点は使わない。";
 
     const { object } = await generateObject({
       model: google("gemini-1.5-flash-latest"),
@@ -80,6 +103,8 @@ export async function POST(request: Request) {
         "warning は、DNAと大きくズレている場合だけ入れる。ズレが小さいときは null。",
         identityBlock,
         shredderBlock,
+        `ROOTS還流優先度: ${billing.rootsSyncPriority}`,
+        survivalSimulationPrompt,
         "日本語で返すこと。",
       ].join("\n"),
       prompt: [
@@ -89,6 +114,7 @@ export async function POST(request: Request) {
         `市場への見せ方: ${emotion}`,
         `強度: ${intensity}`,
         strategyLabel.trim() !== "" ? `戦略タイル: ${strategyLabel.trim()}` : null,
+        `活用フェーズ: ${USAGE_PURPOSE_LABELS[usagePurpose]}`,
         personaBlock,
       ]
         .filter(Boolean)

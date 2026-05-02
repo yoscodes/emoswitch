@@ -188,9 +188,9 @@ export function SettingsPage() {
       });
       setProfile(nextProfile);
       setDisplayName(nextProfile.displayName);
-      setStatus("プロフィール設定を保存しました。");
+      setStatus("保存しました。");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "プロフィール保存に失敗しました");
+      setError(e instanceof Error ? e.message : "保存に失敗しました。");
     }
   };
 
@@ -198,9 +198,9 @@ export function SettingsPage() {
     if (!profile) return;
     try {
       await navigator.clipboard.writeText(profile.id);
-      setStatus("ユーザーIDをコピーしました。");
+      setStatus("保存しました。");
     } catch {
-      setError("ユーザーIDのコピーに失敗しました。");
+      setError("保存に失敗しました。");
     }
   };
 
@@ -215,9 +215,9 @@ export function SettingsPage() {
       link.download = `emoswitch-archive-${new Date().toISOString().slice(0, 10)}.csv`;
       link.click();
       URL.revokeObjectURL(url);
-      setStatus("市場反応ログをCSVで書き出しました。");
+      setStatus("保存しました。");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "CSV書き出しに失敗しました");
+      setError(e instanceof Error ? e.message : "保存に失敗しました。");
     }
   };
 
@@ -228,9 +228,9 @@ export function SettingsPage() {
     setStatus(null);
     try {
       const result = await resetArchive();
-      setStatus(`${result.deletedCount}件の履歴をリセットしました。`);
+      setStatus("保存しました。");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "履歴のリセットに失敗しました");
+      setError(e instanceof Error ? e.message : "保存に失敗しました。");
     } finally {
       setResetting(false);
     }
@@ -248,9 +248,9 @@ export function SettingsPage() {
       });
       setGhostSettings(nextGhost);
       setProfileUrlDraft(nextGhost.profileUrl);
-      setStatus("ペルソナURLを保存しました。");
+      setStatus("保存しました。");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ペルソナURLの保存に失敗しました");
+      setError(e instanceof Error ? e.message : "保存に失敗しました。");
     }
   };
 
@@ -266,9 +266,9 @@ export function SettingsPage() {
       });
       setGhostSettings(nextGhost);
       setNgRawDraft(nextGhost.ngWords.join("\n"));
-      setStatus("NGワードを保存しました。");
+      setStatus("保存しました。");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "NGワードの保存に失敗しました");
+      setError(e instanceof Error ? e.message : "保存に失敗しました。");
     }
   };
 
@@ -277,8 +277,8 @@ export function SettingsPage() {
     profileUrlDraft.trim() === ""
       ? null
       : /^https?:\/\/(www\.)?(x|twitter)\.com\/.+/i.test(profileUrlDraft.trim())
-        ? "XのURLとして認識しています。保存するとペルソナ連携候補として登録されます。"
-        : "URLを確認しました。保存するとペルソナ連携候補として登録されます。";
+        ? "保存すると反映されます。"
+        : "保存すると反映されます。";
 
   if (authLoading || loading) {
     return (
@@ -363,7 +363,7 @@ export function SettingsPage() {
                     </label>
                     <Input id="display-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
                   </div>
-                  <Button onClick={() => void handleSaveProfile()}>保存</Button>
+                  <Button onClick={() => void handleSaveProfile()}>保存する</Button>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
@@ -381,7 +381,7 @@ export function SettingsPage() {
                       </div>
                       <Button variant="outline" onClick={() => void handleCopyUserId()}>
                         <Copy className="mr-1 size-4" />
-                        コピー
+                        保存する
                       </Button>
                     </div>
                   </div>
@@ -456,7 +456,7 @@ export function SettingsPage() {
                     <p className="mt-2 text-sm text-muted-foreground">{previewText}</p>
                   </div>
 
-                  <Button onClick={() => void handleSaveProfile()}>起業家スタンスを保存</Button>
+                  <Button onClick={() => void handleSaveProfile()}>保存する</Button>
                 </div>
 
                 <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
@@ -471,7 +471,7 @@ export function SettingsPage() {
                     <label className="text-sm font-medium" htmlFor="profile-import-url">
                       プロフィール / 投稿 URL
                     </label>
-                    {hasSavedProfileUrl ? <Badge variant="secondary">解析待ち（登録済み）</Badge> : null}
+                    {hasSavedProfileUrl ? <Badge variant="secondary">保存済み</Badge> : null}
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
@@ -490,11 +490,11 @@ export function SettingsPage() {
                       ) : null}
                     </div>
                     <Button variant="outline" onClick={() => void handleSaveProfileImport()}>
-                      ペルソナURLを保存
+                      保存する
                     </Button>
                   </div>
                   <Link href="/identity" className="inline-flex">
-                    <Button>ペルソナページを開く</Button>
+                    <Button>戻る</Button>
                   </Link>
                 </div>
               </CardContent>
@@ -526,7 +526,7 @@ export function SettingsPage() {
                 <Link href="/plans" className="inline-flex">
                   <Button>
                     <CreditCard className="mr-1 size-4" />
-                    プランを変更する
+                    保存する
                   </Button>
                 </Link>
               </CardContent>
@@ -566,18 +566,18 @@ export function SettingsPage() {
                   ) : null}
 
                   <Button variant="outline" onClick={() => void handleSaveNgWords()}>
-                    NGワードを保存
+                    保存する
                   </Button>
                 </div>
 
                 <div className="flex flex-wrap gap-3">
                   <Button variant="outline" onClick={() => void handleExportCsv()}>
                     <Download className="mr-1 size-4" />
-                    市場反応ログをCSVで書き出す
+                    保存する
                   </Button>
                   <Button variant="outline" onClick={() => void handleResetArchive()} disabled={resetting}>
                     <RefreshCcw className="mr-1 size-4" />
-                    全ログを消去
+                    保存する
                   </Button>
                 </div>
 
@@ -586,11 +586,9 @@ export function SettingsPage() {
                     <ShieldAlert className="mt-0.5 size-5 text-destructive" />
                     <div className="space-y-2">
                       <p className="font-medium text-destructive">危険な操作</p>
-                      <p className="text-sm text-muted-foreground">
-                        アカウント削除は Auth・DB・決済の連動整理後に解放予定です。まずは CSV 書き出しでデータを保全してください。
-                      </p>
+                      <p className="text-sm text-muted-foreground">この操作は準備中です。保存して管理してください。</p>
                       <Button variant="destructive" disabled>
-                        アカウントを削除する（準備中）
+                        保存する
                       </Button>
                     </div>
                   </div>

@@ -22,7 +22,7 @@ export function LandingPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link href="/lab" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
-            アプリへ
+            戻る
           </Link>
           <div className="hidden md:block">
             <AuthActions />
@@ -73,7 +73,7 @@ export function LandingPage() {
                   "inline-flex gap-2 rounded-full px-8",
                 )}
               >
-                事業の種を置く
+                生成する
                 <ArrowRight className="size-4" />
               </Link>
               <div className="flex flex-wrap items-center gap-2">
@@ -81,7 +81,7 @@ export function LandingPage() {
                   href="/identity"
                   className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-full")}
                 >
-                  思想を言語化する
+                  保存する
                 </Link>
                 <span className="rounded-full border bg-background/80 px-3 py-2 text-sm text-muted-foreground">
                   ペルソナ資産
@@ -131,7 +131,7 @@ export function LandingPage() {
                 <span>仮説を発信へ変換</span>
                 <span>・</span>
                 <Link href="/lab" className="underline underline-offset-2">
-                  Seed Workspace を開く
+                  戻る
                 </Link>
               </div>
             </div>

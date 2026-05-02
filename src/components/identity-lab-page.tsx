@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, CheckCircle2, Fingerprint, Flame, Link2, ShieldBan, Sparkles } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, Fingerprint, Flame, Scissors, ShieldBan, Sparkles } from "lucide-react";
 
 import { analyzePersona, fetchArchiveInsights, fetchGhostSettings, updateGhostSettings } from "@/lib/api-client";
 import { useAuthSession } from "@/lib/use-auth-session";
@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 const DNA_CHOICE_PREFIX = "dna_choice";
@@ -38,40 +37,40 @@ const FIXED_DNA_QUESTIONS: DnaQuestion[] = [
   {
     id: "logic_vs_emotion",
     prompt: "論理 vs 情緒",
-    leftLabel: "冷徹な分析",
-    rightLabel: "熱い共感",
+    leftLabel: "データが語る真実",
+    rightLabel: "魂を揺さぶる言葉",
     leftSignal: "筋道で納得を作る",
     rightSignal: "感情の温度から始める",
   },
   {
     id: "break_vs_harmony",
     prompt: "破壊 vs 調和",
-    leftLabel: "前提を壊す",
-    rightLabel: "関係を守る",
+    leftLabel: "前提を壊して突破する",
+    rightLabel: "合意をつないで進める",
     leftSignal: "常識への反逆を含む",
     rightSignal: "共感と橋渡しを重視する",
   },
   {
     id: "crowd_vs_solitude",
     prompt: "大衆 vs 孤独",
-    leftLabel: "大衆へ拡張",
-    rightLabel: "孤独を貫く",
+    leftLabel: "みんなの不便を一気に解く",
+    rightLabel: "少数派の痛みを深く救う",
     leftSignal: "広い課題に翻訳する",
     rightSignal: "少数派の痛みから始める",
   },
   {
     id: "speed_vs_density",
     prompt: "スピード vs 密度",
-    leftLabel: "即断で走る",
-    rightLabel: "執念で磨く",
+    leftLabel: "まず出して走りながら直す",
+    rightLabel: "納得するまで削って磨く",
     leftSignal: "検証回数を優先する",
     rightSignal: "意味の濃さを優先する",
   },
   {
     id: "utility_vs_philosophy",
     prompt: "実利 vs 思想",
-    leftLabel: "効能を示す",
-    rightLabel: "思想で染める",
+    leftLabel: "使ってすぐ効く実利",
+    rightLabel: "世界の見方を変える思想",
     leftSignal: "すぐ効く価値を示す",
     rightSignal: "信念の芯を前に出す",
   },
@@ -106,7 +105,6 @@ type DnaChoiceValue = "left" | "right" | null;
 type DnaChoiceMap = Record<DnaQuestionId, DnaChoiceValue>;
 type AntiPersonaKey = (typeof ANTI_PERSONA_FIELDS)[number]["id"];
 type AntiPersonaDraft = Record<AntiPersonaKey, string>;
-type AntiPersonaInputDraft = Record<AntiPersonaKey, string>;
 
 function createEmptyDnaChoiceMap(): DnaChoiceMap {
   return {
@@ -124,65 +122,6 @@ function createEmptyAntiPersonaDraft(): AntiPersonaDraft {
     hated_success_patterns: "",
     intolerable_injustice: "",
   };
-}
-
-function createEmptyAntiPersonaInputDraft(): AntiPersonaInputDraft {
-  return {
-    avoid_phrases: "",
-    hated_success_patterns: "",
-    intolerable_injustice: "",
-  };
-}
-
-function buildDynamicQuestions(settings: GhostSettings | null, antiPersonaDraft: AntiPersonaDraft): DnaQuestion[] {
-  const sourceText = [
-    settings?.personaSummary ?? "",
-    ...(settings?.personaKeywords ?? []),
-    ...(settings?.personaEvidence ?? []),
-    ...Object.values(antiPersonaDraft),
-  ].join(" ");
-
-  const firstPrompt = /(美学|思想|余韻|世界観|孤独|異物)/.test(sourceText)
-    ? {
-        id: "speed_vs_density" as const,
-        prompt: "Rootsを見ると『利益』より『美学』が強い。今回もそう振る？",
-        leftLabel: "利益の手触り",
-        rightLabel: "美学の純度",
-        leftSignal: "市場価値を先に証明する",
-        rightSignal: "美しさで異物感を残す",
-        sourceLabel: "ROOTSから生成",
-      }
-    : {
-        id: "speed_vs_density" as const,
-        prompt: "Rootsを見ると『速度』と『密度』のどちらを優先すると強い？",
-        leftLabel: "まず速く試す",
-        rightLabel: "密度高く磨く",
-        leftSignal: "検証回数を優先する",
-        rightSignal: "意味の濃さを優先する",
-        sourceLabel: "ROOTSから生成",
-      };
-
-  const secondPrompt = /(当事者|不条理|怒り|報われない|傷|痛み)/.test(sourceText)
-    ? {
-        id: "utility_vs_philosophy" as const,
-        prompt: "いまのログでは『当事者性』が強い。今回もそこから語る？",
-        leftLabel: "自分の傷から語る",
-        rightLabel: "誰にでも開いて語る",
-        leftSignal: "当事者の熱で巻き込む",
-        rightSignal: "普遍化して市場へ開く",
-        sourceLabel: "ROOTSから生成",
-      }
-    : {
-        id: "utility_vs_philosophy" as const,
-        prompt: "いまのRootsでは『実利』と『思想』のどちらを前に出す？",
-        leftLabel: "役に立つを先に出す",
-        rightLabel: "思想から世界観を作る",
-        leftSignal: "即効性のある価値を示す",
-        rightSignal: "思想の芯で惹きつける",
-        sourceLabel: "ROOTSから生成",
-      };
-
-  return [firstPrompt, secondPrompt];
 }
 
 function parsePersonaControls(lines: string[]) {
@@ -259,16 +198,22 @@ function splitTagDraft(input: string): string[] {
   );
 }
 
-function choiceToSliderValue(value: DnaChoiceValue): number {
-  if (value === "left") return 0;
-  if (value === "right") return 100;
-  return 50;
+function normalizeIdentityTerm(input: string): string {
+  return input.normalize("NFKC").replace(/\s+/g, " ").trim();
 }
 
-function sliderValueToChoice(value: string): DnaChoiceValue {
-  if (value === "0") return "left";
-  if (value === "100") return "right";
-  return null;
+function resolveProphecyFromChoices(choices: DnaChoiceMap): string {
+  const logicEmotion = choices.logic_vs_emotion;
+  const breakHarmony = choices.break_vs_harmony;
+  const crowdSolitude = choices.crowd_vs_solitude;
+  const unresolvedCount = Object.values(choices).filter((value) => value == null).length;
+
+  if (unresolvedCount > 0) return "平均的な起業家";
+
+  const tone = logicEmotion === "left" ? "論理的な" : logicEmotion === "right" ? "情緒的な" : "均整の取れた";
+  const posture = breakHarmony === "left" ? "異端児" : breakHarmony === "right" ? "調律者" : "探究者";
+  const audience = crowdSolitude === "left" ? "市場翻訳型" : crowdSolitude === "right" ? "少数派特化型" : "中間型";
+  return `${tone}${posture} / ${audience}`;
 }
 
 export function IdentityLabPage() {
@@ -279,7 +224,6 @@ export function IdentityLabPage() {
   const [archiveInsights, setArchiveInsights] = useState<ArchiveInsights | null>(null);
   const [dnaChoices, setDnaChoices] = useState<DnaChoiceMap>(createEmptyDnaChoiceMap());
   const [antiPersonaDraft, setAntiPersonaDraft] = useState<AntiPersonaDraft>(createEmptyAntiPersonaDraft());
-  const [antiPersonaInput, setAntiPersonaInput] = useState<AntiPersonaInputDraft>(createEmptyAntiPersonaInputDraft());
   const [legacyLines, setLegacyLines] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -287,6 +231,8 @@ export function IdentityLabPage() {
   const [saving, setSaving] = useState(false);
   const [syncGlow, setSyncGlow] = useState(false);
   const [activeTuningId, setActiveTuningId] = useState<DnaQuestionId | null>(null);
+  const [previewFlash, setPreviewFlash] = useState(false);
+  const [tabooQuickInput, setTabooQuickInput] = useState("");
 
   const applySettingsToView = useCallback((next: GhostSettings) => {
     const controls = parsePersonaControls(next.manualPosts);
@@ -310,7 +256,7 @@ export function IdentityLabPage() {
         setArchiveInsights(insights);
       })
       .catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Identity 設定の取得に失敗しました");
+        setError(cause instanceof Error ? cause.message : "保存に失敗しました。");
       })
       .finally(() => setLoading(false));
   }, [applySettingsToView, authLoading, user]);
@@ -326,6 +272,11 @@ export function IdentityLabPage() {
     const timeoutId = window.setTimeout(() => setActiveTuningId(null), 1200);
     return () => window.clearTimeout(timeoutId);
   }, [activeTuningId]);
+  useEffect(() => {
+    setPreviewFlash(true);
+    const timeoutId = window.setTimeout(() => setPreviewFlash(false), 260);
+    return () => window.clearTimeout(timeoutId);
+  }, [dnaChoices]);
 
   const serializedControls = useMemo(
     () => serializePersonaControls(dnaChoices, antiPersonaDraft, legacyLines),
@@ -353,13 +304,13 @@ export function IdentityLabPage() {
   const canAnalyze = totalHomeSignals > 0 || selectedChoiceCount > 0 || antiPersonaCount > 0 || legacyLines.length > 0;
   const identityStatusLabel =
     settings?.personaStatus === "approved"
-      ? "Identity · Lab 同期済み"
+      ? "Identity · 保存済み"
       : settings?.personaStatus === "draft"
         ? "Identity · 承認待ち"
         : "Identity · 未生成";
   const resolvedDnaQuestions = useMemo(
-    () => [...FIXED_DNA_QUESTIONS.slice(0, 3), ...buildDynamicQuestions(settings, antiPersonaDraft)],
-    [antiPersonaDraft, settings],
+    () => FIXED_DNA_QUESTIONS,
+    [],
   );
   const extractionRate = Math.min(100, selectedChoiceCount * 12 + antiPersonaCount * 13 + Math.min(totalHot * 6, 35));
   const hasUnsyncedChanges = useMemo(() => {
@@ -395,25 +346,7 @@ export function IdentityLabPage() {
   );
   const readyToGrow = extractionRate === 0;
 
-  const prophecyLabel = useMemo(() => {
-    const logicEmotion = dnaChoices.logic_vs_emotion;
-    const breakHarmony = dnaChoices.break_vs_harmony;
-    const crowdSolitude = dnaChoices.crowd_vs_solitude;
-    const unresolvedCount = Object.values(dnaChoices).filter((value) => value == null).length;
-
-    if (unresolvedCount > 0) {
-      return "平均的な起業家";
-    }
-
-    const tone =
-      logicEmotion === "left" ? "論理的な" : logicEmotion === "right" ? "情緒的な" : "均整の取れた";
-    const posture =
-      breakHarmony === "left" ? "異端児" : breakHarmony === "right" ? "調律者" : "探究者";
-    const audience =
-      crowdSolitude === "left" ? "市場翻訳型" : crowdSolitude === "right" ? "少数派特化型" : "中間型";
-
-    return `${tone}${posture} / ${audience}`;
-  }, [dnaChoices]);
+  const prophecyLabel = useMemo(() => resolveProphecyFromChoices(dnaChoices), [dnaChoices]);
 
   const prevProphecyLabelRef = useRef(prophecyLabel);
   const [prophecyGlow, setProphecyGlow] = useState(false);
@@ -425,6 +358,27 @@ export function IdentityLabPage() {
       return () => window.clearTimeout(timeoutId);
     }
   }, [prophecyLabel]);
+  const marketGapLine = useMemo(() => {
+    const toneGap =
+      dnaChoices.logic_vs_emotion === "left"
+        ? "感情論に寄りすぎた領域で、根拠ある厳密な仮説検証"
+        : dnaChoices.logic_vs_emotion === "right"
+          ? "情報過多で疲れた市場に、体温ある共感ストーリー"
+          : "論理と情緒の橋渡しが不足している領域";
+    const postureGap =
+      dnaChoices.break_vs_harmony === "left"
+        ? "旧来前提を壊すカウンター提案"
+        : dnaChoices.break_vs_harmony === "right"
+          ? "分断を避けつつ合意を作る翻訳提案"
+          : "極端な主張の間を埋める実装案";
+    const audienceGap =
+      dnaChoices.crowd_vs_solitude === "left"
+        ? "ニッチ課題を大衆向けに再定義する余白"
+        : dnaChoices.crowd_vs_solitude === "right"
+          ? "見過ごされた少数派の痛みを言語化する余白"
+          : "大衆と少数派の境界にある未充足課題";
+    return `${toneGap} × ${postureGap} × ${audienceGap}を狙う。`;
+  }, [dnaChoices.break_vs_harmony, dnaChoices.crowd_vs_solitude, dnaChoices.logic_vs_emotion]);
 
   const previewMutation = useMemo(() => {
     const removedWords: string[] = [];
@@ -493,6 +447,17 @@ export function IdentityLabPage() {
       ),
     [antiPersonaDraft],
   );
+  const allTabooTags = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...antiPersonaTags.avoid_phrases,
+          ...antiPersonaTags.hated_success_patterns,
+          ...antiPersonaTags.intolerable_injustice,
+        ]),
+      ),
+    [antiPersonaTags],
+  );
 
   const handleAnalyze = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -506,13 +471,9 @@ export function IdentityLabPage() {
         });
         const next = await analyzePersona();
         applySettingsToView(next);
-        setStatus(
-          options?.silent
-            ? "最新ログを取り込み、Identity DNA を自動更新しました。"
-            : "Identity DNA を再構成しました。中央と右の内容を確認してください。",
-        );
+        setStatus("保存しました。");
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Identity の分析に失敗しました");
+        setError(cause instanceof Error ? cause.message : "保存に失敗しました。");
       } finally {
         setAnalyzing(false);
       }
@@ -552,30 +513,13 @@ export function IdentityLabPage() {
       if (typeof window !== "undefined") {
         sessionStorage.setItem("emoswitch_identity_sync_glow", String(Date.now()));
       }
-      setStatus("Identityを同期しました。あなたの思想がLabに反映されました。");
+      setStatus("保存しました。");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Identity の同期に失敗しました");
+      setError(cause instanceof Error ? cause.message : "保存に失敗しました。");
     } finally {
       setSaving(false);
     }
   }, [applySettingsToView, derivedNgWords, serializedControls, settings, totalHot]);
-
-  const appendAntiPersonaTag = useCallback((field: AntiPersonaKey, rawValue: string) => {
-    const nextValue = rawValue.trim();
-    if (!nextValue) return;
-    setAntiPersonaDraft((current) => {
-      const tags = splitTagDraft(current[field]);
-      if (tags.includes(nextValue)) return current;
-      return {
-        ...current,
-        [field]: [...tags, nextValue].join(" / "),
-      };
-    });
-    setAntiPersonaInput((current) => ({
-      ...current,
-      [field]: "",
-    }));
-  }, []);
 
   const removeAntiPersonaTag = useCallback((field: AntiPersonaKey, tag: string) => {
     setAntiPersonaDraft((current) => {
@@ -585,6 +529,19 @@ export function IdentityLabPage() {
         [field]: tags.join(" / "),
       };
     });
+  }, []);
+  const appendQuickTabooTag = useCallback((rawValue: string) => {
+    const normalized = normalizeIdentityTerm(rawValue);
+    if (!normalized) return;
+    setAntiPersonaDraft((current) => {
+      const existing = splitTagDraft(current.avoid_phrases).map((item) => normalizeIdentityTerm(item));
+      if (existing.includes(normalized)) return current;
+      return {
+        ...current,
+        avoid_phrases: [...existing, normalized].filter(Boolean).join(" / "),
+      };
+    });
+    setTabooQuickInput("");
   }, []);
 
   if (authLoading || loading) {
@@ -667,11 +624,11 @@ export function IdentityLabPage() {
               >
                 {pendingGrowthCount > 0 ? <span className="mr-1.5 size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" /> : null}
                 <CheckCircle2 className="mr-1 size-4" />
-                {saving ? "確定中..." : "Commit Identity"}
+                {saving ? "保存中..." : "保存する"}
               </Button>
               <Link href="/lab">
                 <Button type="button" variant="ghost" size="sm" className="text-muted-foreground">
-                  /lab
+                  戻る
                 </Button>
               </Link>
             </div>
@@ -681,8 +638,8 @@ export function IdentityLabPage() {
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </header>
 
-      <div className="grid gap-7 xl:grid-cols-[0.95fr_1.18fr_0.95fr]">
-        <section className="space-y-6">
+      <div className="grid gap-7 xl:grid-cols-[0.82fr_1.32fr_1.02fr]">
+        <section className="space-y-6 xl:order-1">
           <Card className="rounded-[30px] border-0 bg-white/58 shadow-none backdrop-blur-[2px] dark:bg-background/46">
             <CardHeader className="px-3 pb-3 md:px-4">
               <CardTitle>ROOTS</CardTitle>
@@ -704,6 +661,9 @@ export function IdentityLabPage() {
                       }}
                     >
                       {pendingGrowthCount > 0 ? (
+                        <span className="pointer-events-none absolute inset-0 rounded-full border-2 border-amber-400/60 animate-ping" />
+                      ) : null}
+                      {pendingGrowthCount > 0 ? (
                         <div className="absolute -right-2 top-2 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 shadow-[0_0_24px_-12px_rgba(251,146,60,0.9)] dark:bg-amber-950/25 dark:text-amber-200">
                           +{pendingGrowthCount}
                         </div>
@@ -719,197 +679,202 @@ export function IdentityLabPage() {
                     </div>
                   </div>
                   <div className="mt-4 flex flex-wrap items-center gap-2">
-                    {pendingGrowthCount > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleAnalyze();
-                        }}
-                        className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 shadow-[0_0_30px_-14px_rgba(251,146,60,0.8)] transition-all hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/20 dark:text-amber-200"
-                      >
-                        <span className="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
-                        +{pendingGrowthCount} New Insights
-                      </button>
-                    ) : (
-                      <Badge variant="outline" className="rounded-full">
-                        {readyToGrow ? "Ready to Grow" : "変化なし"}
-                      </Badge>
-                    )}
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "rounded-full",
+                        pendingGrowthCount > 0 &&
+                          "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/20 dark:text-amber-200",
+                      )}
+                    >
+                      {pendingGrowthCount > 0 ? `未保存 +${pendingGrowthCount}` : readyToGrow ? "Ready to Grow" : "変化なし"}
+                    </Badge>
                     <span className="text-xs text-muted-foreground">Hot {totalHot} / 検証 {totalHomeSignals}</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void handleAnalyze({ silent: true })}
+                      disabled={analyzing || !canAnalyze}
+                      className={cn(
+                        "bg-linear-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-500 hover:to-fuchsia-500",
+                        pendingGrowthCount > 0 && "shadow-[0_0_36px_-10px_rgba(124,58,237,0.95)]",
+                      )}
+                    >
+                      {analyzing ? "保存中..." : "保存する"}
+                    </Button>
                   </div>
                 </div>
 
-              <div className="space-y-3 px-3 py-5 md:px-4">
+              <div
+                className={cn(
+                  "space-y-3 px-3 py-5 md:px-4 transition-all duration-500",
+                )}
+              >
                 <div className="flex items-center gap-2">
                   <ShieldBan className="size-4 text-rose-500" />
                   <div>
                     <p className="text-sm font-medium">My Taboo</p>
-                    <p className="text-xs text-muted-foreground">思いついた拒絶を、Enterでタグとして溜めていきます。</p>
+                    <p className="text-xs text-muted-foreground">裁断した破片を管理し、必要な拒絶を追加します。</p>
                   </div>
                 </div>
-                {ANTI_PERSONA_FIELDS.map((field) => (
-                  <div key={field.id} className="space-y-2">
-                    <p className="text-xs font-semibold tracking-wide text-muted-foreground">{field.label}</p>
-                    {antiPersonaTags[field.id].length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {antiPersonaTags[field.id].map((tag) => (
-                          <button
-                            key={`${field.id}-${tag}`}
-                            type="button"
-                            onClick={() => removeAntiPersonaTag(field.id, tag)}
-                            className="inline-flex items-center gap-1 rounded-full border border-rose-200/80 bg-rose-50/80 px-3 py-1 text-xs text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200"
-                          >
-                            {tag}
-                            <span aria-hidden="true">×</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                    <Input
-                      value={antiPersonaInput[field.id]}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setAntiPersonaInput((current) => ({
-                          ...current,
-                          [field.id]: value,
-                        }));
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          appendAntiPersonaTag(field.id, antiPersonaInput[field.id]);
-                        }
-                      }}
-                      className="h-11 border-0 bg-muted/25 shadow-none placeholder:text-muted-foreground/35"
-                      placeholder={field.placeholder}
-                    />
-                  </div>
-                ))}
-                {derivedNgWords.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {derivedNgWords.map((word) => (
-                      <Badge key={word} variant="outline" className="rounded-full text-[11px]">
-                        {word}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
+                <div className="rounded-2xl border border-rose-200/60 bg-rose-50/65 p-3 dark:border-rose-900/40 dark:bg-rose-950/20">
+                  {allTabooTags.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {allTabooTags.map((tag) => (
+                        <button
+                          key={`taboo-fragment-${tag}`}
+                          type="button"
+                          onClick={() => {
+                            removeAntiPersonaTag("avoid_phrases", tag);
+                            removeAntiPersonaTag("hated_success_patterns", tag);
+                            removeAntiPersonaTag("intolerable_injustice", tag);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-full border border-rose-300/80 bg-white/80 px-3 py-1 text-xs text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-800/60 dark:bg-rose-950/35 dark:text-rose-200"
+                        >
+                          <Scissors className="size-3" />
+                          {tag}
+                          <span aria-hidden="true">×</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">まだ裁断済みの破片はありません。下の入力から追加できます。</p>
+                  )}
+                </div>
+                <Input
+                  value={tabooQuickInput}
+                  onChange={(event) => setTabooQuickInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    appendQuickTabooTag(tabooQuickInput);
+                  }}
+                  className="h-11 border-0 bg-muted/25 shadow-none placeholder:text-muted-foreground/35"
+                  placeholder="拒絶ワードを追加して Enter"
+                />
               </div>
             </CardContent>
           </Card>
         </section>
 
-        <section className="space-y-6">
+        <section className="space-y-6 xl:order-3">
           <Card className="rounded-[30px] border-0 bg-white/60 shadow-none backdrop-blur-[2px] dark:bg-background/48">
             <CardHeader className="px-3 pb-3 md:px-4">
               <CardTitle>THE CORE</CardTitle>
-              <CardDescription>あなたの存在の設計図</CardDescription>
+              <CardDescription>操作パネル: DNAを微調整して、称号を育てる</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-0 divide-y divide-border/20 border-t border-border/20 pt-2">
-              {resolvedDnaQuestions.map((question) => {
-                const selected = dnaChoices[question.id];
-                const sliderValue = choiceToSliderValue(selected);
-                return (
-                  <div key={question.id} className="px-3 py-3.5 md:px-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <ArrowLeftRight className="size-4 text-muted-foreground" />
-                        <p className="text-sm font-medium">{question.prompt}</p>
-                        {question.sourceLabel ? <Link2 className="size-3.5 text-muted-foreground/70" /> : null}
+            <CardContent className="border-t border-border/20 pt-3">
+              <div className="grid gap-4 xl:grid-cols-[1.25fr_0.9fr]">
+                <div className="space-y-3 px-3 py-2 md:px-4">
+                  {resolvedDnaQuestions.map((question) => {
+                    const selected = dnaChoices[question.id];
+                    return (
+                      <div key={question.id} className="space-y-2 rounded-2xl border border-border/40 bg-background/50 p-3">
+                        <div className="flex items-center gap-2">
+                          <ArrowLeftRight className="size-4 text-muted-foreground" />
+                          <p className="text-sm font-medium">{question.prompt}</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTuningId(question.id);
+                              setDnaChoices((current) => ({ ...current, [question.id]: "left" }));
+                            }}
+                            className={cn(
+                              "rounded-xl border px-3 py-3 text-left text-sm transition-all duration-200",
+                              selected === "left"
+                                ? "border-violet-500 bg-violet-50 text-violet-900 opacity-100 shadow-[0_0_34px_-14px_rgba(124,58,237,0.95)] dark:border-violet-400 dark:bg-violet-950/35 dark:text-violet-100"
+                                : selected === "right"
+                                  ? "opacity-45"
+                                  : "border-border/60 bg-background/75 hover:border-violet-300",
+                            )}
+                          >
+                            {question.leftLabel}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTuningId(question.id);
+                              setDnaChoices((current) => ({ ...current, [question.id]: "right" }));
+                            }}
+                            className={cn(
+                              "rounded-xl border px-3 py-3 text-left text-sm transition-all duration-200",
+                              selected === "right"
+                                ? "border-violet-500 bg-violet-50 text-violet-900 opacity-100 shadow-[0_0_34px_-14px_rgba(124,58,237,0.95)] dark:border-violet-400 dark:bg-violet-950/35 dark:text-violet-100"
+                                : selected === "left"
+                                  ? "opacity-45"
+                                  : "border-border/60 bg-background/75 hover:border-violet-300",
+                            )}
+                          >
+                            {question.rightLabel}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-2.5 flex items-center gap-3">
-                      <span
-                        className={cn(
-                          "min-w-0 shrink-0 text-[10px] leading-tight text-muted-foreground/85 transition-colors",
-                          selected === "left" && "font-semibold text-foreground",
-                        )}
-                      >
-                        {question.leftLabel}
-                      </span>
-                      <div className="relative flex-1">
-                        <div className="h-2 rounded-full bg-linear-to-r from-violet-200/80 via-zinc-200/70 to-amber-200/80 dark:from-violet-800/60 dark:via-zinc-700/60 dark:to-amber-800/60" />
-                        <div
+                    );
+                  })}
+                </div>
+                <div className="rounded-2xl border border-violet-200/50 bg-violet-50/60 px-3 py-4 dark:border-violet-800/40 dark:bg-violet-950/20 md:px-4">
+                  <p className="text-xs font-semibold tracking-wide text-violet-700/90 dark:text-violet-200/90">DNAシグナル（詳細）</p>
+                  {tuningHighlights.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {tuningHighlights.map((item) => (
+                        <span
+                          key={item.id}
                           className={cn(
-                            "pointer-events-none absolute top-1/2 size-5 -translate-y-1/2 rounded-full border-2 border-white bg-violet-600 shadow-[0_0_24px_-6px_rgba(124,58,237,0.9)] transition-all duration-200 dark:border-background",
-                            activeTuningId === question.id && "scale-110",
+                            "inline-flex rounded-full px-3 py-1 text-xs font-medium transition-all",
+                            activeTuningId === item.id
+                              ? "animate-pulse bg-violet-600 text-white shadow-[0_0_28px_-8px_rgba(124,58,237,0.9)]"
+                              : "bg-violet-100/80 text-violet-700 dark:bg-violet-950/40 dark:text-violet-200",
                           )}
-                          style={{ left: `calc(${sliderValue}% - 10px)` }}
-                        />
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          step="50"
-                          value={sliderValue}
-                          onChange={(event) => {
-                            const next = sliderValueToChoice(event.target.value);
-                            setActiveTuningId(question.id);
-                            setDnaChoices((current) => ({
-                              ...current,
-                              [question.id]: next,
-                            }));
-                          }}
-                          className="absolute inset-0 h-5 w-full cursor-pointer opacity-0"
-                        />
-                      </div>
-                      <span
-                        className={cn(
-                          "min-w-0 shrink-0 text-[10px] leading-tight text-right text-muted-foreground/85 transition-colors",
-                          selected === "right" && "font-semibold text-foreground",
-                        )}
-                      >
-                        {question.rightLabel}
-                      </span>
+                        >
+                          {item.label}
+                        </span>
+                      ))}
                     </div>
-                  </div>
-                );
-              })}
-
-              <div className="rounded-2xl border border-violet-200/50 bg-linear-to-r from-violet-100/75 via-fuchsia-50/55 to-amber-50/35 px-3 py-4 shadow-[0_0_38px_-20px_rgba(139,92,246,0.9)] transition-all dark:border-violet-800/40 dark:from-violet-950/25 dark:via-fuchsia-950/20 dark:to-amber-950/10 md:px-4">
-                <p className="text-xs font-semibold tracking-wide text-violet-700/90 dark:text-violet-200/90">
-                  現在のあなたのスタンス
-                </p>
-                <p
-                  className={cn(
-                    "mt-2 text-[1.75rem] font-extrabold leading-tight text-violet-800 transition-all duration-300 dark:text-violet-100 md:text-[2rem]",
-                    prophecyGlow && "[text-shadow:0_0_32px_rgba(139,92,246,0.55)]",
+                  ) : (
+                    <p className="mt-3 text-xs text-violet-700/80 dark:text-violet-200/80">選択後にここへDNAシグナルが表示されます。</p>
                   )}
-                >
-                  「{prophecyLabel}」
-                </p>
-                {tuningHighlights.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {tuningHighlights.map((item) => (
-                      <span
-                        key={item.id}
-                        className={cn(
-                          "inline-flex rounded-full px-3 py-1 text-xs font-medium transition-all",
-                          activeTuningId === item.id
-                            ? "animate-pulse bg-violet-600 text-white shadow-[0_0_28px_-8px_rgba(124,58,237,0.9)]"
-                            : "bg-violet-100/80 text-violet-700 dark:bg-violet-950/40 dark:text-violet-200",
-                        )}
-                      >
-                        {item.label}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
+                </div>
               </div>
             </CardContent>
           </Card>
         </section>
 
-        <section className="space-y-6">
+        <section className="space-y-6 xl:order-2">
           <Card className="rounded-[30px] border-0 bg-white/58 shadow-none backdrop-blur-[2px] dark:bg-background/46">
             <CardHeader className="px-3 pb-3 md:px-4">
-              <CardTitle>EVIDENCE / PREVIEW</CardTitle>
-              <CardDescription>思想を論理に。アイデンティティを言葉に。</CardDescription>
+              <CardTitle>PREVIEW LAB</CardTitle>
+              <CardDescription>スライダーを動かすと、文体変化が即時に反映されます。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-0 divide-y divide-border/20 border-t border-border/20 pt-2">
+              <div className="px-3 py-5 md:px-4">
+                <div className="rounded-2xl border border-violet-300/60 bg-linear-to-r from-violet-100/85 via-fuchsia-50/70 to-indigo-50/65 px-4 py-4 shadow-[0_0_55px_-20px_rgba(139,92,246,0.9)] dark:border-violet-700/50 dark:from-violet-950/35 dark:via-fuchsia-950/20 dark:to-indigo-950/20">
+                  <p className="text-center text-[11px] font-semibold tracking-[0.18em] text-violet-700 dark:text-violet-200">CURRENT PROPHECY</p>
+                  <p
+                    className={cn(
+                      "mt-2 text-center text-[2rem] font-extrabold leading-tight text-violet-900 transition-all duration-300 dark:text-violet-100 md:text-[2.4rem]",
+                      prophecyGlow && "[text-shadow:0_0_36px_rgba(139,92,246,0.6)]",
+                    )}
+                  >
+                    「{prophecyLabel}」
+                  </p>
+                  <p className="mt-2 text-center text-sm leading-6 text-violet-900/85 dark:text-violet-100/85">{marketGapLine}</p>
+                </div>
+              </div>
               <div className="space-y-3 px-3 py-5 md:px-4">
-                <div className="rounded-2xl bg-linear-to-br from-violet-50/80 via-white to-amber-50/45 p-4 dark:from-violet-950/15 dark:via-background dark:to-amber-950/10">
-                  <p className="text-[11px] font-semibold tracking-wide text-violet-700 dark:text-violet-300">Identity Sample</p>
+                <div
+                  className={cn(
+                    "rounded-2xl bg-linear-to-br from-violet-50/80 via-white to-amber-50/45 p-4 transition-all duration-200 dark:from-violet-950/15 dark:via-background dark:to-amber-950/10",
+                    previewFlash && "scale-[1.01] shadow-[0_0_44px_-22px_rgba(139,92,246,0.9)]",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold tracking-wide text-violet-700 dark:text-violet-300">Identity Sample</p>
+                    <Badge variant="secondary" className={cn("rounded-full text-[10px]", previewFlash && "animate-pulse")}>
+                      LIVE
+                    </Badge>
+                  </div>
                   {tunedPreview ? (
                     <>
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -924,7 +889,7 @@ export function IdentityLabPage() {
                           </span>
                         ))}
                       </div>
-                      <p className="mt-4 text-sm leading-7">{tunedPreview}</p>
+                      <p className="mt-4 text-base leading-8">{tunedPreview}</p>
                     </>
                   ) : (
                     <p className="mt-3 text-sm tracking-wide text-muted-foreground/45">( ? ) Identity を抽出中...</p>
@@ -933,14 +898,14 @@ export function IdentityLabPage() {
 
                 <p className="text-sm font-medium">Identity Filter</p>
                 <div
-                  className="rounded-2xl bg-rose-50/50 p-4 shadow-[0_18px_38px_-30px_rgba(244,63,94,0.85)] dark:bg-rose-950/10"
+                  className="rounded-2xl border border-rose-400/55 bg-rose-50/70 p-4 shadow-[0_24px_52px_-24px_rgba(244,63,94,0.95)] dark:border-rose-700/50 dark:bg-rose-950/20"
                   style={{
                     backgroundImage:
                       "repeating-linear-gradient(135deg, rgba(244,63,94,0.12) 0px, rgba(244,63,94,0.12) 12px, rgba(255,255,255,0.0) 12px, rgba(255,255,255,0.0) 24px)",
                     transform: "rotate(-1deg)",
                   }}
                 >
-                  <p className="text-[11px] font-semibold tracking-wide text-rose-700 dark:text-rose-300">SHREDDER / FAKE SUCCESS SAMPLE</p>
+                  <p className="text-[11px] font-semibold tracking-[0.18em] text-rose-700 dark:text-rose-300">SHREDDER / REJECTED TEXT</p>
                   <p className="relative mt-2 text-sm leading-6 text-rose-700 [text-shadow:0_1px_0_rgba(244,63,94,0.12)] before:absolute before:left-0 before:right-6 before:top-[42%] before:h-[2px] before:-rotate-2 before:bg-rose-500/90 after:absolute after:left-2 after:right-0 after:top-[58%] after:h-[2px] after:rotate-[1.4deg] after:bg-rose-400/80 dark:text-rose-200">
                     {shreddedPreview}
                   </p>
@@ -956,64 +921,27 @@ export function IdentityLabPage() {
               <div className="space-y-4 px-3 py-5 md:px-4">
                 <div className="flex items-center gap-2">
                   <Sparkles className="size-4 text-primary" />
-                  <p className="text-sm font-medium">Identity Logic</p>
+                  <p className="text-sm font-medium">Strategy Note</p>
                 </div>
-                {settings?.personaSummary?.trim() ||
-                settings?.stylePrompt ||
-                (settings?.personaEvidence && settings.personaEvidence.length > 0) ? (
-                  <div className="space-y-4">
-                    {settings?.personaSummary?.trim() ? (
-                      <div>
-                        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">Identity Summary</p>
-                        <p className="mt-2 text-sm leading-7 text-muted-foreground">{settings.personaSummary.trim()}</p>
-                      </div>
-                    ) : null}
-                    {settings?.stylePrompt ? (
-                      <div className={cn(settings?.personaSummary?.trim() && "border-t border-border/15 pt-4")}>
-                        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">Style Prompt</p>
-                        <p className="mt-2 text-sm leading-7 text-muted-foreground">{settings.stylePrompt}</p>
-                      </div>
-                    ) : null}
-                    {settings?.personaEvidence && settings.personaEvidence.length > 0 ? (
-                      <div
-                        className={cn(
-                          (settings?.personaSummary?.trim() || settings?.stylePrompt) && "border-t border-border/15 pt-4",
-                        )}
-                      >
-                        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">Reasoning</p>
-                        <div className="mt-2 space-y-2">
-                          {settings.personaEvidence.map((item) => (
-                            <p key={item} className="text-sm text-muted-foreground">
-                              ・{item}
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
+                <div className="rounded-2xl border border-violet-200/50 bg-violet-50/55 p-4 dark:border-violet-800/40 dark:bg-violet-950/20">
+                  <p className="mt-3 text-sm leading-7 text-violet-900/85 dark:text-violet-100/85">
+                    {tuningSignals.length > 0
+                      ? `現在のDNAシグナル: ${tuningSignals.join(" / ")}`
+                      : "THE COREでDNAを調整し、今日の出力キャラへ微調整してください。"}
+                  </p>
+                  <div className="mt-3">
+                    <Link href="/lab">
+                      <Button type="button" size="sm" className="bg-violet-600 text-white hover:bg-violet-500">
+                        戻る
+                      </Button>
+                    </Link>
                   </div>
-                ) : (
-                  <div className="rounded-2xl bg-muted/18 p-4">
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="size-2 rounded-full bg-violet-400/70" />
-                      <span className="h-px flex-1 bg-border/35" />
-                      <span className="size-2 rounded-full bg-amber-400/60" />
-                    </div>
-                    <div className="flex items-center gap-3 opacity-45">
-                      <div className="size-8 rounded-full border border-border/50" />
-                      <div className="space-y-2 flex-1">
-                        <div className="h-2 w-2/3 rounded-full bg-muted-foreground/20" />
-                        <div className="h-2 w-1/2 rounded-full bg-muted-foreground/15" />
-                      </div>
-                    </div>
-                    <p className="mt-4 text-sm text-muted-foreground/55">分析完了後に、あなたの Identity の相関図が表示されます。</p>
-                  </div>
-                )}
+                </div>
               </div>
             </CardContent>
           </Card>
         </section>
       </div>
-
     </div>
   );
 }

@@ -6,7 +6,13 @@ import { inferMemoryTags } from "@/lib/memory-tags";
 import { EMOTION_LABELS, EMOTION_PROMPTS, type EmotionTone } from "@/lib/emotions";
 import { buildIdentityPromptBlock, buildShredderPromptBlock } from "@/lib/identity-prompt";
 import { SERIES_SLOT_CONFIG, getSeriesSlotLabel } from "@/lib/series";
-import { getIdentityProfile, listHotGenerationMemories, resolveRequestActor } from "@/lib/supabase/services";
+import {
+  getDailyGenerationUsage,
+  getIdentityProfile,
+  listHotGenerationMemories,
+  resolveBillingState,
+  resolveRequestActor,
+} from "@/lib/supabase/services";
 
 export const runtime = "edge";
 
@@ -14,6 +20,9 @@ const bodySchema = z.object({
   draft: z.string().min(1, "ネタが空です"),
   generationMode: z.enum(["single", "series"]).default("single"),
   strategyGoal: z.enum(["awareness", "education", "engagement"]).default("awareness"),
+  usagePurpose: z
+    .enum(["discovery", "blueprint", "refinement", "communication"])
+    .default("discovery"),
   emotion: z.enum(["empathy", "toxic", "mood", "useful", "minimal"]),
   speedMode: z.enum(["flash", "pro"]).default("flash"),
   intensity: z.number().min(0).max(100).default(70),
@@ -40,6 +49,17 @@ const STRATEGY_PROMPTS = {
     "目的は納得形成。なぜその仮説に価値があるのかを、経験と論点整理で腹落ちさせる。",
   engagement:
     "目的は検証募集。問いかけ、募集、壁打ち依頼、小さなオファーで市場の返答を取る。",
+} as const;
+
+const USAGE_PURPOSE_PROMPTS = {
+  discovery:
+    "【ワーク用途: 探索（Discovery）】ニーズ探索・発想の種探し。広がりと多様な視点を最優先し、早い確定や単一結論に走らない。仮説のポートフォリオを増やす。",
+  blueprint:
+    "【ワーク用途: 構築（Blueprint）】商品コンセプト・新サービス案。価値提案の芯、誰のどんな未来が変わるか、差別化の軸を明確にし、一貫したプロダクトストーリーを組み立てる。",
+  refinement:
+    "【ワーク用途: 研磨（Refinement）】仮説の磨き込み・顧客解像度の向上。前提の抜け、論理の飛躍、ターゲット像の粗さを厳しく突き、解像度の高い仮説へ圧縮する。痛みの具体と「解決しなかった場合のリスク」も問う。",
+  communication:
+    "【ワーク用途: 伝達（Communication）】キャッチコピー・広告クリエイティブ。短文の打ち力、記憶に残る言い回し、行動を促す一句を優先する。装飾より刺さる一本を。",
 } as const;
 
 const singleResultSchema = z.object({
@@ -157,11 +177,20 @@ function extractShredderHits(lines: string[]): string[] {
 export async function POST(request: Request) {
   try {
     const actor = await resolveRequestActor(request);
+    const billing = await resolveBillingState(actor.userId);
+    const dailyUsage = await getDailyGenerationUsage(actor.userId);
+    if (!billing.isUnlimited && dailyUsage >= 3) {
+      return Response.json(
+        { error: "無料プランの本日の生成上限（3回）に達しました。プランをアップグレードしてください。" },
+        { status: 402 },
+      );
+    }
     const json = await request.json();
     const {
       draft,
       generationMode,
       strategyGoal,
+      usagePurpose,
       emotion,
       speedMode,
       intensity,
@@ -174,6 +203,19 @@ export async function POST(request: Request) {
       whyMe,
       firstExperiment,
     } = bodySchema.parse(json);
+    if (speedMode === "pro" && !billing.aiWallDeepEnabled) {
+      return Response.json(
+        { error: "ディープ解析（Pro）は有料プランで利用できます。" },
+        { status: 402 },
+      );
+    }
+    const rootsSyncLine =
+      billing.rootsSyncPriority === "high"
+        ? "ROOTS同期: 高優先でDNAへ還流。市場反応ログを優先的に学習し、次回生成へ強く反映する。"
+        : "ROOTS同期: 標準優先度でDNAへ還流。";
+    const survivalSimulationLine = billing.survivalSimulationEnabled
+      ? "生存シミュレーション: 有効。負のイベント耐性（資金・心理・実行負荷）を意識した提案を含める。"
+      : "生存シミュレーション: 無効。";
     const modelName = speedMode === "pro" ? "gemini-1.5-pro-latest" : "gemini-1.5-flash-latest";
     const hotMemories = await listHotGenerationMemories(actor.userId);
     const identity = await getIdentityProfile(actor.userId);
@@ -266,9 +308,12 @@ export async function POST(request: Request) {
       personaLine,
       memoryLine,
       structureLine,
+      rootsSyncLine,
+      survivalSimulationLine,
       identityBlock,
       shredderBlock,
-      `今回の目的: ${STRATEGY_LABELS[strategyGoal]} / ${STRATEGY_PROMPTS[strategyGoal]}`,
+      USAGE_PURPOSE_PROMPTS[usagePurpose],
+      `検証の切り口（武器）: ${STRATEGY_LABELS[strategyGoal]} / ${STRATEGY_PROMPTS[strategyGoal]}`,
       `市場への見せ方: ${EMOTION_LABELS[tone]} / ${EMOTION_PROMPTS[tone]}`,
       `打ち出し強度（0-100）: ${intensity}。高いほど宣言的、低いほど観察的。`,
     ].join("\n");

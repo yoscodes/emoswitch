@@ -113,10 +113,13 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
+export type UsagePurpose = "discovery" | "blueprint" | "refinement" | "communication";
+
 export type GenerateTriplePayload = {
   draft: string;
   generationMode: "single" | "series";
   strategyGoal: "awareness" | "education" | "engagement";
+  usagePurpose: UsagePurpose;
   emotion: "empathy" | "toxic" | "mood" | "useful" | "minimal";
   speedMode: "flash" | "pro";
   intensity: number;
@@ -166,6 +169,7 @@ export type HypothesisCanvasPayload = {
   personaKeywords?: string[];
   personaSummary?: string;
   strategyLabel?: string;
+  usagePurpose?: UsagePurpose;
 };
 
 export type HypothesisCanvasResponse = {
@@ -182,6 +186,16 @@ export type SaveSeriesPayload = Omit<GenerationSeriesRecord, "id" | "createdAt" 
   generationMode: "series";
   items: Array<Pick<GenerationSeriesItemRecord, "slotKey" | "slotLabel" | "body" | "hashtags">>;
 };
+
+export async function createStripeCheckoutSession(payload: {
+  planTier: "basic" | "creator" | "pro";
+  billingCycle: "monthly" | "yearly";
+}): Promise<{ url: string }> {
+  return requestJson<{ url: string }>("/api/stripe/checkout", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
 
 export function notifyDataSync(): void {
   invalidateCachedResource(archiveOverviewResource);
