@@ -31,6 +31,7 @@ import {
   seedArchiveSampleData,
 } from "@/lib/api-client";
 import { EMOTION_LABELS } from "@/lib/emotions";
+import { appendIdentityFieldLog } from "@/lib/roadmap-deploy";
 import { writeReuseSession } from "@/lib/reuse-session";
 import type {
   ArchiveEntry,
@@ -776,6 +777,14 @@ function SeriesItemCard({
     setFeedbackSaving(true);
     try {
       await patchSeriesItemRecord(item.id, { quickFeedback: next });
+      appendIdentityFieldLog({
+        at: new Date().toISOString(),
+        seriesId: item.seriesId,
+        itemId: item.id,
+        quickFeedback: next,
+        likes: item.likes ?? null,
+        memo: item.memo ?? null,
+      });
       void onUpdate();
     } catch {
       setQuickFeedback(previous);

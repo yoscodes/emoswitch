@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, Box, Check, Compass, Flame, Heart, Megaphone, PenLine, Swords, X } from "lucide-react";
+import { BookOpen, Box, Compass, Filter, Heart, Megaphone, PenLine, Swords, X } from "lucide-react";
 
 import { GenerationSkeleton } from "@/components/generation-skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -12,29 +12,43 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   analyzeHypothesisCanvas,
+  DATA_SYNC_EVENT,
   ensureDemoWorkspace,
   fetchArchiveInsights,
   fetchCreditSummary,
   fetchGhostSettings,
   fetchUserProfile,
   generateTriple,
-  patchGenerationRecord,
   saveGenerationRecord,
   type GenerateSeriesItem,
   type GenerateSeriesResponse,
-  type GenerateSingleResponse,
+  type StrategyGoal,
   type UsagePurpose,
 } from "@/lib/api-client";
-import type { QuickFeedback } from "@/lib/types";
-import { CHAMELEON } from "@/lib/chameleon";
+import { STRATEGY_GOAL_UI_LABELS } from "@/lib/strategy-goal";
+import type { GenerationSeriesRecord } from "@/lib/types";
 import { EMOTION_LABELS, type EmotionTone } from "@/lib/emotions";
 import { parseEmotionFromQuery, readAndClearReuseSession } from "@/lib/reuse-session";
+import {
+  mergeStoredPlanBodyForStorage,
+  readRoadmapDeployContext,
+  writeRoadmapDeployContext,
+  type RoadmapDeployContextV1,
+} from "@/lib/roadmap-deploy";
 import { SERIES_SLOT_CONFIG } from "@/lib/series";
+import { getUsagePurposeStepRoleLines, type UsagePurposeKey } from "@/lib/usage-purpose-step-plan";
 import { playSwitchClick } from "@/lib/switch-sound";
 import { cn } from "@/lib/utils";
 
 const CANVAS_PLACEHOLDER =
   "整理せず、そのままの言葉で教えてください";
+
+/** Identity OFF 時に見せる「Vanilla」一般論のイメージ（同一 SEED の再生成ではない比較用コピー） */
+const VANILLA_COMPARISON_ACTION_PLAN: readonly string[] = [
+  "STEP 1では課題仮説を一言にし、最小の投稿または広告枠で初速の反応だけを取りにいきます。",
+  "STEP 2では反応ログを眺め、問いと訴求を1点だけ修正して同じチャネルで再テストします。",
+  "STEP 3では得られた学びを短く言語化し、次の投資判断に回すメモを1枚残します。",
+];
 
 const ENERGY_RGB_BY_EMOTION: Record<EmotionTone, string> = {
   empathy: "236, 72, 153",
@@ -44,7 +58,6 @@ const ENERGY_RGB_BY_EMOTION: Record<EmotionTone, string> = {
   minimal: "82, 82, 91",
 };
 
-type StrategyGoal = "awareness" | "education" | "engagement";
 type StrategyTemplateId = "validation" | "pain-signal" | "authority-proof";
 
 type ArchiveRecommendation = {
@@ -67,7 +80,7 @@ const STRATEGY_TEMPLATES: Array<{
     summary: "共感から入り、同じ痛みを持つ人の反応を確かめる",
     emotion: "empathy",
     intensity: 50,
-    strategyGoal: "engagement",
+    strategyGoal: "empathy",
   },
   {
     id: "pain-signal",
@@ -75,7 +88,7 @@ const STRATEGY_TEMPLATES: Array<{
     summary: "課題の強さを前面に出し、市場の違和感をあぶり出す",
     emotion: "toxic",
     intensity: 90,
-    strategyGoal: "awareness",
+    strategyGoal: "pain_point",
   },
   {
     id: "authority-proof",
@@ -83,15 +96,9 @@ const STRATEGY_TEMPLATES: Array<{
     summary: "論点を整理し、筋の良さで納得と反応を取る",
     emotion: "useful",
     intensity: 55,
-    strategyGoal: "education",
+    strategyGoal: "logic",
   },
 ];
-
-const GOAL_LABELS: Record<StrategyGoal, string> = {
-  awareness: "共感",
-  education: "納得",
-  engagement: "検証",
-};
 
 const USAGE_PURPOSE_TILES: Array<{
   id: UsagePurpose;
@@ -139,11 +146,66 @@ const PURPOSE_VAULT_SLOTS: Record<UsagePurpose, string[]> = {
   communication: ["一言の印象", "シェアしたくなる理由", "行動の障壁"],
 };
 
-const PURPOSE_OUTPUT_SLOTS: Record<UsagePurpose, string[]> = {
-  discovery: ["未踏のニーズ（3案）", "「もしも」のアナロジー思考", "既存市場への違和感"],
-  blueprint: ["最終目標（North Star）", "逆算された中間指標", "最初のアクション（First Step）"],
-  refinement: ["論理の死角（AI Wall）", "顧客の「NO」の理由", "生存日数を延ばすための修正案"],
-  communication: ["感情を揺さぶるキャッチコピー", "シェアしたくなる理由の言語化", "行動の障壁を取り除く一言"],
+/** 活用方法ごとのページ／カードのアクセント（枠・ヘッダー・環境光） */
+const PURPOSE_SURFACE: Record<
+  UsagePurpose,
+  {
+    topWash: string;
+    purposeRadialRgb: string;
+    cardBorder: string;
+    headerWash: string;
+    modalChrome: string;
+    modalHeaderBar: string;
+  }
+> = {
+  discovery: {
+    topWash:
+      "from-emerald-100/30 via-emerald-50/10 to-transparent dark:from-emerald-950/32 dark:via-emerald-950/12 dark:to-transparent",
+    purposeRadialRgb: "52, 211, 153",
+    cardBorder: "border-emerald-200/45 transition-[border-color] duration-500 ease-out dark:border-emerald-800/32",
+    headerWash:
+      "from-emerald-50/50 via-muted/28 to-teal-50/14 dark:from-emerald-950/24 dark:via-background/50 dark:to-teal-950/10",
+    modalChrome:
+      "border-emerald-200/55 ring-2 ring-emerald-400/18 ring-offset-2 ring-offset-background transition-[border-color,box-shadow] duration-500 dark:border-emerald-700/38 dark:ring-emerald-500/15 dark:ring-offset-background",
+    modalHeaderBar:
+      "from-emerald-50/90 via-background to-teal-50/32 dark:from-emerald-950/38 dark:via-background dark:to-teal-950/14",
+  },
+  blueprint: {
+    topWash:
+      "from-sky-100/28 via-sky-50/10 to-transparent dark:from-sky-950/30 dark:via-sky-950/12 dark:to-transparent",
+    purposeRadialRgb: "56, 189, 248",
+    cardBorder: "border-sky-200/45 transition-[border-color] duration-500 ease-out dark:border-sky-700/32",
+    headerWash:
+      "from-sky-50/48 via-muted/28 to-blue-50/14 dark:from-sky-950/24 dark:via-background/50 dark:to-blue-950/10",
+    modalChrome:
+      "border-sky-200/55 ring-2 ring-sky-400/18 ring-offset-2 ring-offset-background transition-[border-color,box-shadow] duration-500 dark:border-sky-700/38 dark:ring-sky-500/15 dark:ring-offset-background",
+    modalHeaderBar:
+      "from-sky-50/90 via-background to-blue-50/30 dark:from-sky-950/38 dark:via-background dark:to-blue-950/14",
+  },
+  refinement: {
+    topWash:
+      "from-orange-100/26 via-violet-100/14 to-transparent dark:from-orange-950/24 dark:via-violet-950/20 dark:to-transparent",
+    purposeRadialRgb: "251, 146, 60",
+    cardBorder: "border-orange-200/42 transition-[border-color] duration-500 ease-out dark:border-violet-600/36",
+    headerWash:
+      "from-orange-50/38 via-violet-50/28 to-fuchsia-50/12 dark:from-orange-950/18 dark:via-violet-950/18 dark:to-fuchsia-950/8",
+    modalChrome:
+      "border-orange-200/50 ring-2 ring-orange-400/16 ring-offset-2 ring-offset-background transition-[border-color,box-shadow] duration-500 dark:border-violet-600/42 dark:ring-violet-500/18 dark:ring-offset-background",
+    modalHeaderBar:
+      "from-orange-50/88 via-background to-violet-50/28 dark:from-orange-950/32 dark:via-background dark:to-violet-950/16",
+  },
+  communication: {
+    topWash:
+      "from-fuchsia-100/26 via-rose-50/10 to-transparent dark:from-fuchsia-950/28 dark:via-fuchsia-950/12 dark:to-transparent",
+    purposeRadialRgb: "244, 114, 182",
+    cardBorder: "border-fuchsia-200/42 transition-[border-color] duration-500 ease-out dark:border-fuchsia-800/28",
+    headerWash:
+      "from-fuchsia-50/42 via-muted/26 to-rose-50/14 dark:from-fuchsia-950/22 dark:via-background/48 dark:to-rose-950/10",
+    modalChrome:
+      "border-fuchsia-200/52 ring-2 ring-fuchsia-400/18 ring-offset-2 ring-offset-background transition-[border-color,box-shadow] duration-500 dark:border-fuchsia-700/35 dark:ring-fuchsia-500/15 dark:ring-offset-background",
+    modalHeaderBar:
+      "from-fuchsia-50/90 via-background to-rose-50/30 dark:from-fuchsia-950/36 dark:via-background dark:to-rose-950/14",
+  },
 };
 
 type HatTone = "white" | "red" | "black" | "yellow" | "green" | "purple";
@@ -224,35 +286,31 @@ const PURPOSE_PROTOCOL: Record<
 };
 
 function inferGoalFromEmotion(emotion: EmotionTone): StrategyGoal {
-  if (emotion === "useful") return "education";
-  if (emotion === "mood") return "engagement";
-  return "awareness";
+  if (emotion === "useful") return "logic";
+  if (emotion === "mood") return "pain_point";
+  return "empathy";
 }
 
-function buildSeriesRoadmap(templateLabel: string, emotionLabel: string) {
-  return [
-    {
-      rangeLabel: "DAY 1-10",
-      focus: "第1フェーズ",
-      goal: "認知ではなく共感",
-      objective: "課題を自分ごとにしてもらう",
-      detail: `${templateLabel}の切り口で痛みを可視化し、${emotionLabel}の見せ方で最初の反応を集める`,
-    },
-    {
-      rangeLabel: "DAY 11-20",
-      focus: "第2フェーズ",
-      goal: "信頼ではなく納得",
-      objective: "なぜその仮説が成立するかを示す",
-      detail: "経験・観察・小さな実験結果を出し、事業の筋が通っていると感じてもらう",
-    },
-    {
-      rangeLabel: "DAY 21-30",
-      focus: "第3フェーズ",
-      goal: "ファン化ではなく検証",
-      objective: "一緒に試したい人を集める",
-      detail: "募集、壁打ち、簡易オファーを提示して、市場から次の一手を受け取る",
-    },
+/** 左カラム STEP 3 / 結果モーダル用。API の用途別3ステップ役割と整合 */
+function buildPurposeAlignedStepRoadmap(
+  purposeKey: UsagePurposeKey,
+  weaponAxisLabel: string,
+  emotionLabel: string,
+) {
+  const roles = [...getUsagePurposeStepRoleLines(purposeKey)];
+  const goalHints: readonly [string, string, string] = [
+    "市場に小さく見せ、初速の反応を取る",
+    "観測と学びを、次の打ち手に反映する",
+    "成果と反応を言語化し、次の検証ループへ繋げる",
   ];
+  return roles.map((role, index) => ({
+    rangeLabel: `STEP ${index + 1}`,
+    role,
+    focus: weaponAxisLabel,
+    goal: goalHints[index]!,
+    objective: `トーン: ${emotionLabel}`,
+    detail: `API と同じ役割「${role}」の一歩を、生成の本文・すぐやることで具体化します。`,
+  }));
 }
 
 const STRATEGY_TILE_META: Record<StrategyTemplateId, { icon: React.ReactElement }> = {
@@ -306,7 +364,6 @@ function buildOpportunitySeed(params: {
   return sections.join("\n\n");
 }
 
-type SingleResult = GenerateSingleResponse;
 type SeriesResult = GenerateSeriesResponse;
 
 export function MainLabWorkspace() {
@@ -315,25 +372,18 @@ export function MainLabWorkspace() {
   const prevHasLiveOutputRef = useRef(false);
   const [draft, setDraft] = useState("");
   const [refinementAnswer, setRefinementAnswer] = useState("");
-  const [generationMode, setGenerationMode] = useState<"single" | "series">("single");
-  const [strategyGoal, setStrategyGoal] = useState<StrategyGoal>("awareness");
+  const [strategyGoal, setStrategyGoal] = useState<StrategyGoal>("empathy");
   const [emotion, setEmotion] = useState<EmotionTone>("empathy");
   const [intensity, setIntensity] = useState(50);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [variants, setVariants] = useState<string[]>([]);
-  const [variantFocuses, setVariantFocuses] = useState<string[]>([]);
-  const [hashtags, setHashtags] = useState<string[]>([]);
   const [seriesTitle, setSeriesTitle] = useState("");
   const [seriesItems, setSeriesItems] = useState<GenerateSeriesItem[]>([]);
   const [adviceHint, setAdviceHint] = useState<string | null>(null);
   const [ghostWhisper, setGhostWhisper] = useState<string | null>(null);
   const [memoryTags, setMemoryTags] = useState<string[]>([]);
-  const [resultMode, setResultMode] = useState<"single" | "series">("single");
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [currentId, setCurrentId] = useState<string | null>(null);
   const [archiveRecommendation, setArchiveRecommendation] = useState<ArchiveRecommendation | null>(null);
   const [personaKeywords, setPersonaKeywords] = useState<string[]>([]);
   const [personaSummary, setPersonaSummary] = useState("");
@@ -345,15 +395,13 @@ export function MainLabWorkspace() {
   const [dnaAlignment, setDnaAlignment] = useState<number | null>(null);
   const [dnaAlignmentReason, setDnaAlignmentReason] = useState<string | null>(null);
   const [resultsModalOpen, setResultsModalOpen] = useState(false);
-  const [feedbackSaving, setFeedbackSaving] = useState(false);
-  const [quickFeedback, setQuickFeedback] = useState<QuickFeedback>(null);
-  const [likesInput, setLikesInput] = useState("");
-  const [memoInput, setMemoInput] = useState("");
+  const [identityFilterOn, setIdentityFilterOn] = useState(true);
+  const [lastGenerationIdentityMode, setLastGenerationIdentityMode] = useState<"rich" | "vanilla">("rich");
+  const [lastSavedSeries, setLastSavedSeries] = useState<GenerationSeriesRecord | null>(null);
+  const [roadmapDeploySnap, setRoadmapDeploySnap] = useState<{ seriesId: string; planTitle: string } | null>(null);
 
-  const chameleon = CHAMELEON[emotion];
   const energyGlow = ENERGY_RGB_BY_EMOTION[emotion];
-  const currentGoalLabel = GOAL_LABELS[strategyGoal];
-  const isSprintMode = generationMode === "series";
+  const currentGoalLabel = STRATEGY_GOAL_UI_LABELS[strategyGoal];
   const trimmedDraft = draft.trim();
   const storedSeed = useMemo(
     () =>
@@ -371,10 +419,22 @@ export function MainLabWorkspace() {
   const activeTemplate = STRATEGY_TEMPLATES.find((template) => template.id === activeTemplateId) ?? null;
   const canChooseSprint = trimmedDraft.length > 0;
   const vaultReactionSlots = PURPOSE_VAULT_SLOTS[usagePurposeId];
-  const outputSlots = PURPOSE_OUTPUT_SLOTS[usagePurposeId];
+  const stepActionPreview = useMemo(
+    () => [...getUsagePurposeStepRoleLines(usagePurposeId as UsagePurposeKey)],
+    [usagePurposeId],
+  );
   const activePurpose = USAGE_PURPOSE_TILES.find((tile) => tile.id === usagePurposeId) ?? USAGE_PURPOSE_TILES[0];
   const activeProtocol = PURPOSE_PROTOCOL[usagePurposeId];
-  const seriesRoadmap = buildSeriesRoadmap(activeTemplate?.label ?? currentGoalLabel, EMOTION_LABELS[emotion]);
+  const purposeSurface = PURPOSE_SURFACE[usagePurposeId];
+  const seriesRoadmap = useMemo(
+    () =>
+      buildPurposeAlignedStepRoadmap(
+        usagePurposeId as UsagePurposeKey,
+        currentGoalLabel,
+        EMOTION_LABELS[emotion],
+      ),
+    [usagePurposeId, currentGoalLabel, emotion],
+  );
   const archiveToneLabel = archiveRecommendation?.emotion ? EMOTION_LABELS[archiveRecommendation.emotion] : null;
   const identityExtractionPercent = useMemo(() => {
     const kw = personaKeywords?.length ?? 0;
@@ -388,13 +448,16 @@ export function MainLabWorkspace() {
   const sprintTimelinePhases = useMemo(
     () =>
       seriesRoadmap.map((phase, index) => {
-        const slot = SERIES_SLOT_CONFIG[index];
+        const baseSlot = SERIES_SLOT_CONFIG[index];
         const generated = seriesItems[index];
 
         return {
           ...phase,
-          slot,
+          slot: baseSlot
+            ? { ...baseSlot, title: phase.role, subtitle: `${phase.focus}・${phase.objective}` }
+            : undefined,
           body: generated?.body ?? phase.detail,
+          immediateAction: generated?.immediateAction ?? null,
           validationMetric: generated?.validationMetric ?? null,
           hashtags: generated?.hashtags ?? [],
           style: SPRINT_PHASE_STYLES[index] ?? SPRINT_PHASE_STYLES[0],
@@ -402,38 +465,27 @@ export function MainLabWorkspace() {
       }),
     [seriesItems, seriesRoadmap],
   );
-  const deployTitle =
-    generationMode === "series"
-      ? "30日プランをまとめて生成"
-      : activeTemplate
-        ? `${activeTemplate.label}で検証を実行`
-        : "検証の型を選んでから生成";
-  const deployHint =
-    generationMode === "series"
-      ? `「${activePurpose.label}」の用途で30日案を一括生成します。`
-      : activeTemplate
-        ? `「${activePurpose.label}」×「${activeTemplate.label}」で3案を出します。`
-        : `まず「${activePurpose.label}」の用途を確認し、武器（戦略）を選んでください。`;
+  const deployTitle = activeTemplate
+    ? `${activeTemplate.label}でアクションプランを生成`
+    : "武器（検証の型）を選んでから生成";
+  const deployHint = activeTemplate
+    ? `「${activePurpose.label}」×「${activeTemplate.label}」で、3ステップの行動計画を出します。`
+    : `まず「${activePurpose.label}」の用途を確認し、武器（戦略）を選んでください。`;
   const deployOutputComposition = useMemo(() => {
     const purpose = activePurpose.label;
-    const nextActionCopy = "「今日、今すぐできること」まで具体化して提示";
-    const depthCopy = `「${purpose}」に基づき、5つの視点から多角分析`;
-    if (generationMode === "series") {
-      return {
-        coreConcept: `30日スプリントを軸に据えた「${purpose}」の最適化案`,
-        thinkingDepth: depthCopy,
-        nextAction: nextActionCopy,
-      };
-    }
     const weapon = activeTemplate?.label;
+    const nextActionCopy = "各ステップに「すぐやること」を必ず添えて提示";
+    const depthCopy = weapon
+      ? `「${purpose}」の3ステップ役割と「${weapon}」を軸に、アクションプラン（JSON）を生成`
+      : `「${purpose}」の3ステップ役割でアクションプランを生成（武器を選ぶと切り口がより明確になります）`;
     return {
       coreConcept: weapon
-        ? `「${weapon}」を軸に据えた「${purpose}」の最適化案`
-        : `武器（検証の型）を軸に据えた「${purpose}」の最適化案`,
+        ? `「${weapon}」を軸に据えた「${purpose}」のアクションプラン`
+        : `武器（検証の型）を軸に据えた「${purpose}」のアクションプラン`,
       thinkingDepth: depthCopy,
       nextAction: nextActionCopy,
     };
-  }, [activePurpose.label, activeTemplate?.label, generationMode]);
+  }, [activePurpose.label, activeTemplate?.label]);
   const applyTonePreset = useCallback((nextEmotion: EmotionTone, nextIntensity?: number) => {
     setEmotion(nextEmotion);
     if (typeof nextIntensity === "number") {
@@ -553,7 +605,6 @@ export function MainLabWorkspace() {
       void analyzeHypothesisCanvas({
         draft: storedSeed,
         refinementAnswer,
-        generationMode,
         emotion,
         intensity,
         personaKeywords,
@@ -579,7 +630,6 @@ export function MainLabWorkspace() {
   }, [
     activeTemplate?.label,
     emotion,
-    generationMode,
     intensity,
     personaKeywords,
     personaSummary,
@@ -605,27 +655,17 @@ export function MainLabWorkspace() {
     }
   };
 
-  const runGenerate = useCallback(async (options?: { modeOverride?: "single" | "series"; intensityOverride?: number }) => {
-    const requestedMode = options?.modeOverride ?? generationMode;
+  const runGenerate = useCallback(async (options?: { intensityOverride?: number }) => {
     const requestedIntensity = options?.intensityOverride ?? intensity;
-    const requestedSpeedMode = requestedMode === "series" ? "pro" : "flash";
+    const requestedSpeedMode = "flash";
     if (!storedSeed.trim()) return;
     setError(null);
     setLoading(true);
-    setVariants([]);
-    setVariantFocuses([]);
-    setHashtags([]);
     setSeriesTitle("");
     setSeriesItems([]);
     setAdviceHint(null);
     setGhostWhisper(null);
     setMemoryTags([]);
-    setResultMode(requestedMode);
-    setSelectedIndex(null);
-    setCurrentId(null);
-    setQuickFeedback(null);
-    setLikesInput("");
-    setMemoInput("");
     setResultsModalOpen(false);
     playSwitchClick();
 
@@ -642,12 +682,12 @@ export function MainLabWorkspace() {
 
       const data = await generateTriple({
         draft: storedSeed,
-        generationMode: requestedMode,
         strategyGoal,
         usagePurpose: usagePurposeId,
         emotion,
         speedMode: requestedSpeedMode,
         intensity: requestedIntensity,
+        identityMode: identityFilterOn ? "rich" : "vanilla",
         ngWords: ghost.ngWords,
         stylePrompt: ghost.stylePrompt.trim(),
         personaKeywords,
@@ -655,73 +695,46 @@ export function MainLabWorkspace() {
         whyMe: [
           refinementAnswer.trim(),
           `活用目的: ${activePurpose.label}（${activePurpose.phase}）。${activePurpose.summary}`,
-          requestedMode === "series" ? "30日の検証プランとして設計したい" : null,
-          requestedMode === "single" && activeTemplate
-            ? `優先したい切り口: ${GOAL_LABELS[activeTemplate.strategyGoal]}（${activeTemplate.label}）`
+          "3ステップのアクションプラン（行動計画）として設計したい",
+          activeTemplate
+            ? `優先したい切り口: ${STRATEGY_GOAL_UI_LABELS[activeTemplate.strategyGoal]}（${activeTemplate.label}）`
             : null,
         ]
           .filter(Boolean)
           .join("\n"),
       });
 
-      if ("seriesTitle" in data) {
-        const seriesData = data as SeriesResult;
-        setSeriesTitle(seriesData.seriesTitle);
-        setSeriesItems(seriesData.items);
-        setAdviceHint(seriesData.adviceHint ?? null);
-        setGhostWhisper(seriesData.ghostWhisper ?? null);
-        setMemoryTags(seriesData.memoryTags ?? []);
+      const seriesData = data as SeriesResult;
+      setSeriesTitle(seriesData.seriesTitle);
+      setSeriesItems(seriesData.items);
+      setAdviceHint(seriesData.adviceHint ?? null);
+      setGhostWhisper(seriesData.ghostWhisper ?? null);
+      setMemoryTags(seriesData.memoryTags ?? []);
 
-        await saveGenerationRecord({
-          generationMode: "series",
-          title: seriesData.seriesTitle,
-          draft: storedSeed,
-          emotion,
-          intensity: requestedIntensity,
-          speedMode: requestedSpeedMode,
-          adviceHint: seriesData.adviceHint ?? null,
-          ghostWhisper: seriesData.ghostWhisper ?? null,
-          quickFeedback: null,
-          memoryTags: seriesData.memoryTags ?? [],
-          items: seriesData.items.map((item) => ({
-            slotKey: item.slotKey,
-            slotLabel: item.slotLabel,
-            body: item.body,
-            hashtags: item.hashtags,
-          })),
-        });
+      const row = await saveGenerationRecord({
+        generationMode: "series",
+        title: seriesData.seriesTitle,
+        draft: storedSeed,
+        emotion,
+        intensity: requestedIntensity,
+        speedMode: requestedSpeedMode,
+        adviceHint: seriesData.adviceHint ?? null,
+        ghostWhisper: seriesData.ghostWhisper ?? null,
+        quickFeedback: null,
+        memoryTags: seriesData.memoryTags ?? [],
+        items: seriesData.items.map((item) => ({
+          slotKey: item.slotKey,
+          slotLabel: item.slotLabel,
+          body: mergeStoredPlanBodyForStorage(item.body, item.immediateAction ?? ""),
+          hashtags: item.hashtags,
+        })),
+      });
+      if ("items" in row && row.generationMode === "series") {
+        setLastSavedSeries(row);
       } else {
-        const singleData = data as SingleResult;
-        setVariants(singleData.variants);
-        setVariantFocuses(singleData.variantFocuses ?? []);
-        setHashtags(singleData.hashtags);
-        setAdviceHint(singleData.adviceHint ?? null);
-        setGhostWhisper(singleData.ghostWhisper ?? null);
-        setMemoryTags(singleData.memoryTags ?? []);
-
-        const row = await saveGenerationRecord({
-          generationMode: "single",
-          draft: storedSeed,
-          emotion,
-          intensity: requestedIntensity,
-          speedMode: requestedSpeedMode,
-          variants: singleData.variants,
-          hashtags: singleData.hashtags,
-          selectedIndex: null,
-          likes: null,
-          memo: null,
-          adviceHint: singleData.adviceHint ?? null,
-          quickFeedback: null,
-          memoryTags: singleData.memoryTags ?? [],
-        });
-
-        if (row.generationMode === "single") {
-          setCurrentId(row.id);
-          setQuickFeedback(row.quickFeedback ?? null);
-          setLikesInput(row.likes != null ? String(row.likes) : "");
-          setMemoInput(row.memo ?? "");
-        }
+        setLastSavedSeries(null);
       }
+      setLastGenerationIdentityMode(identityFilterOn ? "rich" : "vanilla");
     } catch (e) {
       setError(e instanceof Error ? e.message : "エラー");
     } finally {
@@ -729,7 +742,6 @@ export function MainLabWorkspace() {
     }
   }, [
     emotion,
-    generationMode,
     intensity,
     personaKeywords,
     personaSummary,
@@ -741,61 +753,8 @@ export function MainLabWorkspace() {
     storedSeed,
     strategyGoal,
     usagePurposeId,
+    identityFilterOn,
   ]);
-
-  const selectVariant = (index: number) => {
-    setSelectedIndex(index);
-    if (currentId) {
-      void patchGenerationRecord(currentId, { selectedIndex: index })
-        .then((row) => {
-          setQuickFeedback(row.quickFeedback ?? null);
-          setLikesInput(row.likes != null ? String(row.likes) : "");
-          setMemoInput(row.memo ?? "");
-        })
-        .catch(() => undefined);
-    }
-  };
-  const saveSingleFeedback = useCallback(
-    async (payload: Partial<{ quickFeedback: QuickFeedback; likes: number | null; memo: string | null }>) => {
-      if (!currentId) return;
-      setFeedbackSaving(true);
-      setError(null);
-      try {
-        const row = await patchGenerationRecord(currentId, payload);
-        setQuickFeedback(row.quickFeedback ?? null);
-        setLikesInput(row.likes != null ? String(row.likes) : "");
-        setMemoInput(row.memo ?? "");
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "フィードバック保存に失敗しました");
-      } finally {
-        setFeedbackSaving(false);
-      }
-    },
-    [currentId],
-  );
-  const handleQuickFeedback = useCallback(
-    (nextValue: Exclude<QuickFeedback, null>) => {
-      const resolved = quickFeedback === nextValue ? null : nextValue;
-      setQuickFeedback(resolved);
-      void saveSingleFeedback({ quickFeedback: resolved });
-    },
-    [quickFeedback, saveSingleFeedback],
-  );
-  const handleSaveValidationMemo = useCallback(() => {
-    const parsedLikes = likesInput.trim() === "" ? null : Number.parseInt(likesInput, 10);
-    void saveSingleFeedback({
-      likes: parsedLikes == null || Number.isNaN(parsedLikes) ? null : parsedLikes,
-      memo: memoInput.trim() === "" ? null : memoInput.trim(),
-    });
-  }, [likesInput, memoInput, saveSingleFeedback]);
-
-  const copyText = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      /* ignore */
-    }
-  };
 
   const applyStrategyTemplate = (templateId: StrategyTemplateId) => {
     const template = STRATEGY_TEMPLATES.find((item) => item.id === templateId);
@@ -811,24 +770,31 @@ export function MainLabWorkspace() {
     playSwitchClick();
   };
 
+  const handleDiscardGeneratedPlan = useCallback(() => {
+    setResultsModalOpen(false);
+    setSeriesItems([]);
+    setSeriesTitle("");
+    setAdviceHint(null);
+    setGhostWhisper(null);
+    setMemoryTags([]);
+    setLastSavedSeries(null);
+    setError(null);
+    playSwitchClick();
+  }, []);
+
   const columnCardClass =
-    "flex h-full min-h-0 flex-col overflow-hidden rounded-[30px] border border-border/10 bg-white/95 shadow-[0_20px_55px_-44px_rgba(15,23,42,0.18)] dark:border-border/15 dark:bg-background/94";
-  const columnHeaderClass =
-    "shrink-0 border-b border-border/20 bg-linear-to-r from-violet-50/40 via-muted/30 to-fuchsia-50/20 px-4 py-3 dark:from-violet-950/25 dark:via-background/50 dark:to-fuchsia-950/10";
+    "flex h-full min-h-0 flex-col overflow-hidden rounded-[30px] border bg-white/95 shadow-[0_20px_55px_-44px_rgba(15,23,42,0.18)] dark:bg-background/94";
+  const columnHeaderBase =
+    "shrink-0 border-b border-border/20 bg-linear-to-r px-4 py-3 transition-[background-image] duration-500 ease-out";
   const columnBodyClass =
     "min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]";
   const outputBodyClass =
     "flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]";
   const laneDividerClass = "border-t border-border/15 pt-4";
-  const hasLiveOutput =
-    (resultMode === "single" && variants.length === 3) || (resultMode === "series" && seriesItems.length === 3);
+  const hasLiveOutput = seriesItems.length === 3;
   const alignmentPercent =
     dnaAlignment == null ? null : Math.min(100, Math.max(0, Math.round(dnaAlignment)));
-  const canDeploy =
-    Boolean(storedSeed.trim()) &&
-    !uploading &&
-    !loading &&
-    (generationMode === "series" || activeTemplate != null);
+  const canDeploy = Boolean(storedSeed.trim()) && !uploading && !loading && activeTemplate != null;
 
   const seedReportFragment = useMemo(() => {
     const raw = draft.trim() || storedSeed.replace(/\n+/g, " ").trim();
@@ -844,9 +810,40 @@ export function MainLabWorkspace() {
     return identityExtractionPercent;
   }, [alignmentPercent, identityExtractionPercent]);
 
-  const survivalBoostDays = useMemo(() => {
-    return Math.min(28, Math.max(3, Math.round(identityResonancePercent * 0.16 + 7)));
-  }, [identityResonancePercent]);
+  const handleDeployToRoadmap = useCallback(() => {
+    if (!lastSavedSeries) return;
+    const payload: RoadmapDeployContextV1 = {
+      v: 1,
+      seriesId: lastSavedSeries.id,
+      planTitle: lastSavedSeries.title,
+      usagePurposeLabel: activePurpose.label,
+      usagePurposePhase: activePurpose.phase,
+      weaponLabel: activeTemplate?.label ?? "",
+      firstAction: activeProtocol.firstAction,
+      finalGoal: activeProtocol.finalGoal,
+      protocolLines: activeProtocol.modalLines.map((entry) => ({
+        hat: entry.hat,
+        short: HAT_META[entry.hat].short,
+        line: entry.line,
+      })),
+      dnaAlignmentReason,
+      identityResonancePercent,
+      deployedAt: new Date().toISOString(),
+    };
+    writeRoadmapDeployContext(payload);
+    setRoadmapDeploySnap({ seriesId: lastSavedSeries.id, planTitle: lastSavedSeries.title });
+    setResultsModalOpen(false);
+    router.push(`/roadmap?series=${lastSavedSeries.id}`);
+  }, [
+    activePurpose.label,
+    activePurpose.phase,
+    activeProtocol,
+    activeTemplate?.label,
+    dnaAlignmentReason,
+    identityResonancePercent,
+    lastSavedSeries,
+    router,
+  ]);
 
   useEffect(() => {
     if (hasLiveOutput && !prevHasLiveOutputRef.current) {
@@ -873,12 +870,33 @@ export function MainLabWorkspace() {
     };
   }, [resultsModalOpen]);
 
+  useEffect(() => {
+    const syncRoadmapSnap = () => {
+      const ctx = readRoadmapDeployContext();
+      setRoadmapDeploySnap(ctx ? { seriesId: ctx.seriesId, planTitle: ctx.planTitle } : null);
+    };
+    syncRoadmapSnap();
+    window.addEventListener(DATA_SYNC_EVENT, syncRoadmapSnap);
+    return () => window.removeEventListener(DATA_SYNC_EVENT, syncRoadmapSnap);
+  }, []);
+
   return (
     <div className="relative min-h-[calc(100vh-4rem)] overflow-hidden bg-zinc-50 transition-colors duration-500 ease-out dark:bg-background">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-x-0 top-0 h-28 bg-linear-to-b from-violet-100/18 to-transparent dark:from-violet-950/20" />
         <div
-          className="absolute inset-0 opacity-[0.14] transition-opacity duration-500 dark:opacity-[0.12]"
+          className={cn(
+            "absolute inset-x-0 top-0 h-32 bg-linear-to-b to-transparent transition-all duration-500 ease-out",
+            purposeSurface.topWash,
+          )}
+        />
+        <div
+          className="absolute inset-0 opacity-[0.13] transition-opacity duration-500 ease-out dark:opacity-[0.11]"
+          style={{
+            background: `radial-gradient(ellipse 88% 44% at 50% -10%, rgba(${purposeSurface.purposeRadialRgb}, 0.32), transparent 56%)`,
+          }}
+        />
+        <div
+          className="absolute inset-0 opacity-[0.12] transition-opacity duration-500 dark:opacity-[0.1]"
           style={{
             background: `radial-gradient(ellipse 90% 45% at 50% -10%, rgba(${energyGlow}, 0.35), transparent 55%)`,
           }}
@@ -888,8 +906,8 @@ export function MainLabWorkspace() {
       <div className="relative mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 pb-4 pt-5 md:px-6 md:pt-8 xl:px-8 2xl:px-10 lg:h-[calc(100vh-4rem)]">
         <div className="flex flex-1 min-h-0 flex-col gap-4">
           <div className="grid flex-1 min-h-0 gap-5 lg:h-full lg:grid-cols-[minmax(280px,1fr)_minmax(440px,1.65fr)_minmax(320px,1.2fr)] lg:items-start xl:gap-6 xl:grid-cols-[minmax(300px,1fr)_minmax(520px,1.65fr)_minmax(340px,1.2fr)] 2xl:grid-cols-[minmax(320px,1fr)_minmax(580px,1.65fr)_minmax(360px,1.2fr)]">
-              <section className={columnCardClass}>
-                <div className={columnHeaderClass}>
+              <section className={cn(columnCardClass, purposeSurface.cardBorder)}>
+                <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-2.5">
                       <span className="text-xl leading-none" aria-hidden>
@@ -955,20 +973,12 @@ export function MainLabWorkspace() {
                 </div>
               </section>
 
-              <section
-                className={cn(
-                  columnCardClass,
-                  "flex min-h-0 flex-col",
-                  isSprintMode && "bg-violet-50/30 dark:bg-violet-950/18",
-                )}
-              >
-                <div className={columnHeaderClass}>
+              <section className={cn(columnCardClass, purposeSurface.cardBorder, "flex min-h-0 flex-col")}>
+                <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold tracking-tight text-foreground">STRATEGY</p>
-                      <p className="text-xs text-muted-foreground">
-                        {generationMode === "series" ? "目的 → 30日プラン" : "目的 → 武器（戦略）"}
-                      </p>
+                      <p className="text-xs text-muted-foreground">目的 → 武器（戦略）→ アクションプラン</p>
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       {loading ? (
@@ -977,15 +987,15 @@ export function MainLabWorkspace() {
                       <Badge variant="outline" className="rounded-full border-amber-200/60 bg-amber-50/80 text-[10px] text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-100">
                         {activePurpose.label}
                       </Badge>
-                      {generationMode === "series" ? (
-                        <Badge variant="secondary" className="rounded-full text-[10px]">
-                          30日プラン
-                        </Badge>
-                      ) : activeTemplate ? (
+                      {activeTemplate ? (
                         <Badge variant="secondary" className="rounded-full text-[10px]">
                           {activeTemplate.label}
                         </Badge>
-                      ) : null}
+                      ) : (
+                        <Badge variant="secondary" className="rounded-full text-[10px]">
+                          アクションプラン
+                        </Badge>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1035,85 +1045,59 @@ export function MainLabWorkspace() {
                   </div>
                 </div>
 
-                {isSprintMode ? (
-                  <motion.div
-                    key="strategy-mode-banner"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={cn(laneDividerClass, "bg-linear-to-r from-violet-500/10 via-violet-500/5 to-transparent")}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold tracking-wide text-violet-700 dark:text-violet-200">PLAN MODE</p>
-                        <p className="mt-1 text-sm font-medium">30日プラン作成モードです</p>
-                      </div>
-                      <Badge className="rounded-full bg-violet-600 text-white">Professional</Badge>
+                <div className={laneDividerClass}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">STEP 2</p>
+                      <p className="text-sm font-medium">武器（検証の型）</p>
                     </div>
-                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                      3フェーズで実行計画を作ります。
-                    </p>
-                  </motion.div>
-                ) : null}
+                    <p className="text-[11px] text-muted-foreground">3スタイル</p>
+                  </div>
+                  <div className="mt-3.5 grid gap-2.5 md:grid-cols-3 md:gap-3">
+                    {strategyMatrixTiles.map((template) => {
+                      const active = template.id === activeTemplateId;
+                      const meta = STRATEGY_TILE_META[template.id];
+
+                      return (
+                        <button
+                          key={template.id}
+                          type="button"
+                          onClick={() => applyStrategyTemplate(template.id)}
+                          className={cn(
+                            "flex min-h-[198px] flex-col rounded-[22px] border border-transparent bg-muted/25 px-3.5 pb-3.5 pt-3 text-left transition-all hover:bg-muted/40 md:min-h-[208px] md:rounded-[24px] md:px-4 md:pb-4 md:pt-3.5",
+                            active
+                              ? "border-violet-400/40 bg-white/90 shadow-[0_0_32px_-14px_rgba(124,58,237,0.55)] ring-2 ring-violet-500/50 ring-offset-1 ring-offset-white/80 dark:border-violet-500/35 dark:bg-background/85 dark:ring-violet-400/45 dark:ring-offset-background"
+                              : "border-border/15",
+                          )}
+                        >
+                          <div className="flex justify-end pb-0.5">
+                            <span className="inline-flex size-7 items-center justify-center rounded-full bg-background/80 text-muted-foreground md:size-8">
+                              {meta.icon}
+                            </span>
+                          </div>
+                          <div className="mt-3 flex-1 md:mt-3.5">
+                            <p className="text-[15px] font-semibold leading-snug md:text-base">{template.label}</p>
+                            <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground md:text-sm md:leading-6">
+                              {template.summary}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 {canChooseSprint ? (
                   <div className={laneDividerClass}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="space-y-1">
-                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">検証ルート</p>
-                        <p className="text-sm font-medium">次の検証形式を選ぶ</p>
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">STEP 3</p>
+                        <p className="text-sm font-medium">3ステップの実行の流れ</p>
                       </div>
-                      <Badge variant="outline" className="rounded-full text-[11px]">入力後に選択可能</Badge>
-                    </div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <button
-                        type="button"
-                        onClick={() => setGenerationMode("single")}
-                        className={cn(
-                          "rounded-2xl border border-border/30 bg-muted/25 p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition-all hover:bg-muted/45 dark:border-border/25 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]",
-                          generationMode === "single" &&
-                            cn(
-                              "bg-background shadow-[0_0_36px_-10px_rgba(124,58,237,0.55),inset_0_1px_0_rgba(255,255,255,0.85)] ring-2 ring-offset-2 dark:bg-background/90 dark:shadow-[0_0_40px_-12px_rgba(139,92,246,0.45),inset_0_1px_0_rgba(255,255,255,0.06)]",
-                              chameleon.ring,
-                            ),
-                        )}
-                      >
-                        <p className="text-sm font-semibold">単発検証</p>
-                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                          いまの仮説を市場にぶつける3案を比較し、まず最初の反応を取りにいきます。
-                        </p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setGenerationMode("series")}
-                        className={cn(
-                          "rounded-2xl border border-border/30 bg-muted/25 p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition-all hover:bg-muted/45 dark:border-border/25 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]",
-                          generationMode === "series" &&
-                            "border-violet-300/45 bg-background shadow-[0_0_36px_-10px_rgba(124,58,237,0.6),inset_0_1px_0_rgba(255,255,255,0.85)] ring-2 ring-violet-400/55 ring-offset-2 ring-offset-zinc-50 dark:border-violet-500/35 dark:bg-violet-950/25 dark:shadow-[0_0_40px_-12px_rgba(139,92,246,0.5),inset_0_1px_0_rgba(255,255,255,0.06)] dark:ring-violet-400/45 dark:ring-offset-background",
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold">30日プラン</p>
-                          <Badge className="rounded-full bg-violet-600 text-white">30日</Badge>
-                        </div>
-                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                          30日分の実行計画を一括で作成します。
-                        </p>
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                {generationMode === "series" ? (
-                  <div className={laneDividerClass}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">STEP 2</p>
-                        <p className="text-sm font-medium">30日を3フェーズで管理</p>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">タイムライン</p>
+                      <p className="text-[11px] text-muted-foreground">生成で肉付け</p>
                     </div>
                     <div className="mt-4 grid gap-3 xl:grid-cols-3">
-                      {sprintTimelinePhases.map((phase, index) => (
+                      {sprintTimelinePhases.map((phase) => (
                         <div key={phase.rangeLabel} className="rounded-2xl bg-background/35 p-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
@@ -1161,7 +1145,7 @@ export function MainLabWorkspace() {
                               推奨強度: {archiveRecommendation.intensity}%
                             </Badge>
                           ) : null}
-                          {(archiveRecommendation.emotion || archiveRecommendation.intensity != null) ? (
+                          {archiveRecommendation.emotion || archiveRecommendation.intensity != null ? (
                             <Button type="button" variant="ghost" size="sm" onClick={applyArchiveRecommendationPreset} className="h-7 px-2 text-xs">
                               保存する
                             </Button>
@@ -1170,92 +1154,144 @@ export function MainLabWorkspace() {
                       ) : null}
                     </div>
                   </div>
-                ) : (
-                  <div className={laneDividerClass}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">STEP 2</p>
-                        <p className="text-sm font-medium">武器（検証の型）</p>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">3スタイル</p>
-                    </div>
-                    <div className="mt-3.5 grid gap-2.5 md:grid-cols-3 md:gap-3">
-                      {strategyMatrixTiles.map((template) => {
-                        const active = template.id === activeTemplateId;
-                        const meta = STRATEGY_TILE_META[template.id];
-
-                        return (
-                          <button
-                            key={template.id}
-                            type="button"
-                            onClick={() => applyStrategyTemplate(template.id)}
-                            className={cn(
-                              "flex min-h-[198px] flex-col rounded-[22px] border border-transparent bg-muted/25 px-3.5 pb-3.5 pt-3 text-left transition-all hover:bg-muted/40 md:min-h-[208px] md:rounded-[24px] md:px-4 md:pb-4 md:pt-3.5",
-                              active
-                                ? "border-violet-400/40 bg-white/90 shadow-[0_0_32px_-14px_rgba(124,58,237,0.55)] ring-2 ring-violet-500/50 ring-offset-1 ring-offset-white/80 dark:border-violet-500/35 dark:bg-background/85 dark:ring-violet-400/45 dark:ring-offset-background"
-                                : "border-border/15",
-                            )}
-                          >
-                            <div className="flex justify-end pb-0.5">
-                              <span className="inline-flex size-7 items-center justify-center rounded-full bg-background/80 text-muted-foreground md:size-8">
-                                {meta.icon}
-                              </span>
-                            </div>
-                            <div className="mt-3 flex-1 md:mt-3.5">
-                              <p className="text-[15px] font-semibold leading-snug md:text-base">{template.label}</p>
-                              <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground md:text-sm md:leading-6">
-                                {template.summary}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                ) : null}
                 </div>
               </section>
 
-              <section className={cn(columnCardClass, "flex flex-col")}>
-                <div className={columnHeaderClass}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold tracking-tight text-foreground">LIVE OUTPUT</p>
-                      <p className="text-sm text-muted-foreground">
-                        {generationMode === "series"
-                          ? "生成後はモーダルで30日プランを表示"
-                          : "生成後はモーダルで検証レポートを表示"}
-                      </p>
+              <section className={cn(columnCardClass, purposeSurface.cardBorder, "flex flex-col")}>
+                <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold tracking-tight text-foreground">LIVE OUTPUT</p>
+                        <p className="text-sm text-muted-foreground">
+                          Lab は作戦の錬成、Roadmap は実行と検証記録。生成後はモーダルで「作戦の契約書」を確認します。
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <div
+                          className="inline-flex items-center gap-1 rounded-full border border-border/35 bg-background/70 p-0.5 shadow-sm"
+                          title="OFF ではペルソナ・DNA・成功メモを外し、比較用の浅い一般論寄りの出力になります。"
+                        >
+                          <Filter className="ml-1 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="hidden text-[10px] font-medium text-muted-foreground sm:inline">Filter</span>
+                          <button
+                            type="button"
+                            className={cn(
+                              "rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                              identityFilterOn
+                                ? "bg-violet-600 text-white shadow-sm"
+                                : "text-muted-foreground hover:text-foreground",
+                            )}
+                            aria-pressed={identityFilterOn}
+                            onClick={() => {
+                              playSwitchClick();
+                              setIdentityFilterOn(true);
+                            }}
+                          >
+                            ON
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(
+                              "mr-0.5 rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                              !identityFilterOn
+                                ? "bg-zinc-600 text-white shadow-sm dark:bg-zinc-500"
+                                : "text-muted-foreground hover:text-foreground",
+                            )}
+                            aria-pressed={!identityFilterOn}
+                            onClick={() => {
+                              playSwitchClick();
+                              setIdentityFilterOn(false);
+                            }}
+                          >
+                            OFF
+                          </button>
+                        </div>
+                        <Badge variant="outline" className="shrink-0 rounded-full border-border/35 text-[10px] text-muted-foreground">
+                          アクション
+                        </Badge>
+                      </div>
                     </div>
-                    <Badge variant="outline" className="shrink-0 rounded-full border-border/35 text-[10px] text-muted-foreground">
-                      {generationMode === "series" ? "Sprint" : "シグナル"}
-                    </Badge>
+                    {!identityFilterOn ? (
+                      <p className="text-[10px] leading-relaxed text-amber-800/90 dark:text-amber-200/85">
+                        Identity Filter OFF：次の「生成する」は比較用（Vanilla）。レポートは浅い一般論寄りになります。
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col">
                 <div className={cn(outputBodyClass, "space-y-4")}>
-                {!hasLiveOutput ? (
                   <div className="space-y-4">
+                    {!loading && roadmapDeploySnap ? (
+                      <div className="rounded-2xl border border-emerald-200/60 bg-emerald-50/50 p-4 dark:border-emerald-900/45 dark:bg-emerald-950/20">
+                        <p className="text-[11px] font-semibold tracking-wide text-emerald-900 dark:text-emerald-100">
+                          Roadmap ステータス
+                        </p>
+                        <p className="mt-2 text-sm leading-relaxed text-foreground">
+                          現在、Roadmap にて作戦
+                          <span className="mx-1 font-semibold text-violet-700 dark:text-violet-200">
+                            「{roadmapDeploySnap.planTitle}」
+                          </span>
+                          を実行中です。検証フィードバックは Roadmap で入力してください。
+                        </p>
+                        {hasLiveOutput && lastSavedSeries?.id !== roadmapDeploySnap.seriesId ? (
+                          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                            ※ Lab に別の生成結果が表示されています。Roadmap のアクティブを切り替えるには、モーダルで新しい作戦をデプロイしてください。
+                          </p>
+                        ) : null}
+                        <Link
+                          href={`/roadmap?series=${roadmapDeploySnap.seriesId}`}
+                          className={cn(
+                            buttonVariants({ variant: "outline", size: "sm" }),
+                            "mt-3 inline-flex",
+                          )}
+                        >
+                          Roadmap を開く
+                        </Link>
+                      </div>
+                    ) : null}
+
+                    {!loading && hasLiveOutput && !roadmapDeploySnap ? (
+                      <div className="rounded-2xl border border-amber-200/55 bg-amber-50/30 p-4 dark:border-amber-800/40 dark:bg-amber-950/15">
+                        <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100">作戦は未デプロイ</p>
+                        <p className="mt-2 text-sm leading-relaxed text-foreground">
+                          モーダルで「作戦の契約書」を確認し、Roadmap へ送るか破棄するかを決めてください。
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-3"
+                          onClick={() => setResultsModalOpen(true)}
+                        >
+                          作戦の契約書を開く
+                        </Button>
+                      </div>
+                    ) : null}
+
                     <div className="rounded-2xl border border-border/15 bg-background/50 p-4">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">何を出すか</p>
+                        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
+                          AI Analysis Protocol（3ステップの役割）
+                        </p>
                         <Badge variant="outline" className="rounded-full text-[10px]">
                           {activePurpose.phase}
                         </Badge>
                       </div>
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        「{activePurpose.label}」では、次の3スロットを優先して出力します。
+                        「{activePurpose.label}」では、次の3ステップでアクションプランを出力します（API の指示と同じ役割です）。
                       </p>
                       <div className="mt-3 grid gap-2">
-                        {outputSlots.map((slot, index) => (
+                        {stepActionPreview.map((role, index) => (
                           <div
-                            key={slot}
+                            key={`${usagePurposeId}-${index}`}
                             className="flex items-center gap-2.5 rounded-xl border border-border/30 bg-muted/12 px-3 py-2.5"
                           >
                             <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[10px] font-semibold text-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
                               {index + 1}
                             </span>
-                            <span className="text-xs font-medium text-foreground/90">{slot}</span>
+                            <span className="text-xs font-medium text-foreground/90">STEP {index + 1}: {role}</span>
                           </div>
                         ))}
                       </div>
@@ -1278,89 +1314,58 @@ export function MainLabWorkspace() {
                         ))}
                       </div>
                     </div>
-                  </div>
-                ) : null}
 
-                <AnimatePresence mode="wait">
-                  {loading ? (
-                    <motion.div key="sk" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                      <GenerationSkeleton />
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
-
-                {!loading && hasLiveOutput && !resultsModalOpen ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={cn(laneDividerClass, "rounded-2xl border border-violet-200/35 bg-linear-to-br from-violet-50/70 to-background p-4 dark:border-violet-900/40 dark:from-violet-950/25")}
-                  >
-                    <p className="text-xs font-semibold tracking-wide text-violet-900 dark:text-violet-100">検証レポート</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {resultMode === "series" ? "30日プランをモーダルで確認できます。" : "仮説案はモーダルにまとまっています。"}
-                    </p>
-                    <Button type="button" className="mt-3" onClick={() => setResultsModalOpen(true)}>
-                      レポートを開く
-                    </Button>
-                  </motion.div>
-                ) : null}
-
-                {resultMode === "single" && variants.length === 3 && !resultsModalOpen ? (
-                  <div className={cn(laneDividerClass, "space-y-4")}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">検証フィードバック</p>
-                        <p className="mt-1 text-sm text-muted-foreground">反応を残すと、次回の精度向上に使われます。</p>
+                    {!identityFilterOn ? (
+                      <div className="rounded-2xl border border-dashed border-border/40 bg-muted/10 p-4">
+                        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">Vanilla 比較（イメージ）</p>
+                        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                          Identity を外したときに寄りやすい「どこにでも置ける」抽象案の雰囲気です（下の例は現在の種とは未連動の定型）。OFF
+                          のまま生成すると、API が同じ方針で実データを返します。
+                        </p>
+                        <ul className="mt-3 space-y-2">
+                          {VANILLA_COMPARISON_ACTION_PLAN.map((line, i) => (
+                            <li
+                              key={i}
+                              className="text-xs leading-relaxed text-muted-foreground/70 text-pretty dark:text-muted-foreground/65"
+                            >
+                              {line}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant={quickFeedback === "hot" ? "default" : "outline"}
-                          size="sm"
-                          disabled={!currentId || feedbackSaving}
-                          onClick={() => handleQuickFeedback("hot")}
-                        >
-                          反応あり
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={quickFeedback === "cold" ? "default" : "outline"}
-                          size="sm"
-                          disabled={!currentId || feedbackSaving}
-                          onClick={() => handleQuickFeedback("cold")}
-                        >
-                          刺さらず
-                        </Button>
+                    ) : null}
+
+                    {!loading && hasLiveOutput && identityFilterOn && !resultsModalOpen ? (
+                      <div className="rounded-2xl border border-dashed border-amber-200/55 bg-amber-50/25 p-4 dark:border-amber-800/40 dark:bg-amber-950/15">
+                        <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100">Vanilla 比較メモ</p>
+                        {lastGenerationIdentityMode === "vanilla" ? (
+                          <p className="mt-1 text-xs leading-relaxed text-amber-950/85 dark:text-amber-100/85">
+                            直近の生成は Identity Filter OFF です。モーダル内が「浅い一般論寄り」の比較出力になっています。
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-xs leading-relaxed text-amber-950/85 dark:text-amber-100/85">
+                            直近のレポートは Identity ON で生成されています。OFF
+                            の出力と並べて比較するには、OFF に切り替えてからもう一度「生成する」を押してください。
+                          </p>
+                        )}
+                        <ul className="mt-3 space-y-1.5 opacity-60">
+                          {VANILLA_COMPARISON_ACTION_PLAN.map((line, i) => (
+                            <li key={i} className="text-[11px] leading-relaxed text-muted-foreground line-clamp-2">
+                              {line}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-[140px_minmax(0,1fr)_auto] md:items-end">
-                      <label className="space-y-2">
-                        <span className="text-xs font-semibold tracking-wide text-muted-foreground">いいね数</span>
-                        <input
-                          type="number"
-                          min="0"
-                          inputMode="numeric"
-                          value={likesInput}
-                          onChange={(event) => setLikesInput(event.target.value)}
-                          className="h-10 w-full rounded-xl border-0 bg-muted/40 px-3 text-sm outline-none"
-                          placeholder="例: 23"
-                        />
-                      </label>
-                      <label className="space-y-2">
-                        <span className="text-xs font-semibold tracking-wide text-muted-foreground">検証メモ</span>
-                        <Textarea
-                          value={memoInput}
-                          onChange={(event) => setMemoInput(event.target.value)}
-                          className="min-h-10 resize-y border-0 bg-muted/40 shadow-none"
-                          placeholder="投稿時間、反応の質、次に変えたい点など"
-                        />
-                      </label>
-                      <Button type="button" variant="outline" disabled={!currentId || feedbackSaving} onClick={handleSaveValidationMemo}>
-                        {feedbackSaving ? "保存中…" : "保存する"}
-                      </Button>
-                    </div>
+                    ) : null}
                   </div>
-                ) : null}
+
+                  <AnimatePresence mode="wait">
+                    {loading ? (
+                      <motion.div key="sk" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                        <GenerationSkeleton />
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
                 </div>
 
                 <div className="shrink-0 space-y-3 border-t border-border/15 bg-linear-to-t from-background/95 to-background/70 px-4 py-3 dark:from-background/90 dark:to-background/55">
@@ -1390,7 +1395,7 @@ export function MainLabWorkspace() {
                       size="sm"
                       disabled={!canDeploy}
                       onClick={() => {
-                        void runGenerate({ modeOverride: generationMode });
+                        void runGenerate();
                       }}
                       className={cn(
                         "w-full min-w-0 shrink-0 bg-linear-to-r from-fuchsia-600 via-violet-600 to-purple-600 text-white hover:from-fuchsia-500 hover:via-violet-500 hover:to-purple-500 md:w-auto md:min-w-[184px]",
@@ -1419,29 +1424,38 @@ export function MainLabWorkspace() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="lab-results-modal-title"
-            className="relative z-1 flex max-h-[min(92dvh,900px)] w-full max-w-2xl flex-col overflow-hidden rounded-t-[28px] border border-border/25 bg-background shadow-[0_-32px_90px_-40px_rgba(0,0,0,0.45)] sm:rounded-[28px] sm:shadow-[0_40px_120px_-48px_rgba(0,0,0,0.55)]"
+            className={cn(
+              "relative z-1 flex max-h-[min(92dvh,900px)] w-full max-w-2xl flex-col overflow-hidden rounded-t-[28px] border bg-background shadow-[0_-32px_90px_-40px_rgba(0,0,0,0.45)] sm:rounded-[28px] sm:shadow-[0_40px_120px_-48px_rgba(0,0,0,0.55)]",
+              purposeSurface.modalChrome,
+            )}
           >
-            <div className="shrink-0 border-b border-border/15 bg-linear-to-r from-violet-50/90 via-background to-fuchsia-50/35 px-5 pb-4 pt-5 dark:from-violet-950/35 dark:via-background dark:to-fuchsia-950/15">
+            <div
+              className={cn(
+                "shrink-0 border-b border-border/15 bg-linear-to-r px-5 pb-4 pt-5 transition-[background-image] duration-500",
+                purposeSurface.modalHeaderBar,
+              )}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
                   <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-background/90 text-violet-700 shadow-sm ring-1 ring-border/35 dark:text-violet-200">
-                    {resultMode === "series" ? (
-                      <BookOpen className="size-5" />
-                    ) : activeTemplateId ? (
+                    {activeTemplateId ? (
                       <span className="grid place-items-center [&_svg]:size-5">{STRATEGY_TILE_META[activeTemplateId].icon}</span>
                     ) : (
-                      <Flame className="size-5 text-orange-500" />
+                      <BookOpen className="size-5" />
                     )}
                   </span>
                   <div className="min-w-0">
                     <h2 id="lab-results-modal-title" className="text-lg font-semibold tracking-tight text-foreground">
-                      検証レポート
+                      作戦の契約書
                     </h2>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      この作戦で本当に Roadmap（戦地）へ赴くか、ここでジャッジしてください。
+                    </p>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                       <span className="font-medium text-foreground/90">活用: {activePurpose.label}</span>
                       <span className="text-muted-foreground/80"> · </span>
                       <span className="font-medium text-foreground/90">
-                        武器: {resultMode === "series" ? "30日プラン" : activeTemplate?.label ?? "単発検証"}
+                        武器: {activeTemplate?.label ?? "検証の型"}
                       </span>
                       {seedReportFragment ? (
                         <>
@@ -1464,6 +1478,16 @@ export function MainLabWorkspace() {
                         {deployOutputComposition.nextAction}
                       </li>
                     </ul>
+                    {lastGenerationIdentityMode === "vanilla" ? (
+                      <p className="mt-2 rounded-lg border border-amber-200/70 bg-amber-50/90 px-3 py-2 text-[10px] leading-relaxed text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-100">
+                        この生成は <span className="font-semibold">Identity Filter OFF（Vanilla 比較）</span>
+                        です。本文はペルソナ・DNA・成功メモを外した浅い一般論寄りの出力です。磨き込むには{" "}
+                        <Link href="/identity" className="font-semibold underline underline-offset-2">
+                          Identity
+                        </Link>{" "}
+                        で DNA を整え、Filter を ON にして再生成してください。
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <Button
@@ -1492,10 +1516,17 @@ export function MainLabWorkspace() {
             </div>
 
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4 [scrollbar-gutter:stable]">
-              {ghostWhisper ? (
-                <div className="border-l-2 border-violet-200/70 pl-3 text-sm text-violet-950 dark:border-violet-800/60 dark:text-violet-100">
-                  <p className="text-xs font-semibold uppercase tracking-wide">Identity DNA からの示唆</p>
-                  <p className="mt-1 leading-relaxed">{ghostWhisper}</p>
+              {lastGenerationIdentityMode === "vanilla" ? (
+                <div className="rounded-2xl border border-amber-200/70 bg-amber-50/90 p-4 dark:border-amber-800/50 dark:bg-amber-950/30">
+                  <p className="text-[11px] font-semibold tracking-wide text-amber-900 dark:text-amber-100">Vanilla 比較メモ</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-950/90 dark:text-amber-100/90">
+                    この生成は <span className="font-semibold">Identity Filter OFF（Vanilla 比較）</span>
+                    です。本文はペルソナ・DNA・成功メモを外した浅い一般論寄りの出力です。磨き込むには{" "}
+                    <Link href="/identity" className="font-semibold underline underline-offset-2">
+                      Identity
+                    </Link>{" "}
+                    で DNA を整え、Filter を ON にして再生成してください。
+                  </p>
                 </div>
               ) : null}
 
@@ -1506,6 +1537,9 @@ export function MainLabWorkspace() {
                     {activePurpose.label}
                   </Badge>
                 </div>
+                <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                  下の「3ステップの行動計画」が API の本体です。ハットは読み解き用の補助イメージです。
+                </p>
                 <div className="mt-3 space-y-2">
                   {activeProtocol.modalLines.map((entry) => {
                     const meta = HAT_META[entry.hat];
@@ -1533,172 +1567,71 @@ export function MainLabWorkspace() {
                 </div>
               </div>
 
-              {resultMode === "series" ? (
-                <div className="space-y-4">
-                  <div className="rounded-2xl bg-muted/25 p-4">
-                    <p className="text-sm font-medium text-muted-foreground">30日プラン名</p>
-                    <p className="mt-1 text-lg font-semibold text-foreground">{seriesTitle}</p>
-                  </div>
-                  <div className="space-y-3">
-                    <p className="text-xs font-semibold tracking-wide text-muted-foreground">30日の流れ</p>
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {sprintTimelinePhases.map((phase, index) => {
-                        const item = seriesItems[index];
-                        return (
-                          <div key={phase.rangeLabel} className={cn("rounded-2xl p-4", phase.style.glow)}>
-                            <div className="flex items-center justify-between gap-2">
-                              <Badge className={cn("rounded-full", phase.style.tone)}>{phase.slot?.title ?? phase.focus}</Badge>
-                              <span className="text-[10px] font-semibold text-muted-foreground">{phase.rangeLabel}</span>
-                            </div>
-                            <p className="mt-3 text-sm font-medium">{phase.goal}</p>
-                            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{item?.body ?? phase.detail}</p>
-                            {item?.validationMetric ? (
-                              <div className="mt-3 border-l-2 border-dashed border-border/50 pl-3">
-                                <p className="text-[10px] font-semibold tracking-wide text-muted-foreground">成功指標</p>
-                                <p className="mt-1 text-xs text-muted-foreground">{item.validationMetric}</p>
-                              </div>
-                            ) : null}
+              <div className="space-y-4">
+                <div className="rounded-2xl bg-muted/25 p-4">
+                  <p className="text-sm font-medium text-muted-foreground">プラン名</p>
+                  <p className="mt-1 text-lg font-semibold text-foreground">{seriesTitle}</p>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold tracking-wide text-muted-foreground">3ステップの行動計画</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {sprintTimelinePhases.map((phase, index) => {
+                      const item = seriesItems[index];
+                      return (
+                        <div key={phase.rangeLabel} className={cn("rounded-2xl p-4", phase.style.glow)}>
+                          <div className="flex items-center justify-between gap-2">
+                            <Badge className={cn("rounded-full", phase.style.tone)}>{phase.slot?.title ?? phase.focus}</Badge>
+                            <span className="text-[10px] font-semibold text-muted-foreground">{phase.rangeLabel}</span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid gap-3">
-                  {variants.map((text, index) => {
-                    const picked = selectedIndex === index;
-                    const variantFocus = variantFocuses[index] ?? `仮説の切り口 ${index + 1}`;
-                    const label = `仮説案 ${index + 1}`;
-                    return (
-                      <button
-                        key={index}
-                        type="button"
-                        onClick={() => selectVariant(index)}
-                        className={cn(
-                          "rounded-2xl border border-border/20 bg-muted/10 p-4 text-left transition-all hover:bg-muted/20",
-                          picked && cn("bg-background shadow-md ring-2 ring-offset-2 ring-offset-background", chameleon.ring),
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <Badge variant="outline">{label}</Badge>
-                          {picked ? <Check className="size-4 text-green-600" /> : null}
+                          <p className="mt-3 text-sm font-medium">{phase.goal}</p>
+                          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{item?.body ?? phase.detail}</p>
+                          {phase.immediateAction ? (
+                            <div className="mt-3 border-l-2 border-violet-300/60 pl-3 dark:border-violet-700/50">
+                              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground">すぐやること</p>
+                              <p className="mt-1 text-xs font-medium text-foreground">{phase.immediateAction}</p>
+                            </div>
+                          ) : null}
+                          {item?.validationMetric ? (
+                            <div className="mt-3 border-l-2 border-dashed border-border/50 pl-3">
+                              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground">成功指標</p>
+                              <p className="mt-1 text-xs text-muted-foreground">{item.validationMetric}</p>
+                            </div>
+                          ) : null}
+                          {item?.hashtags && item.hashtags.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                              {item.hashtags.map((tag) => (
+                                <Badge key={tag} variant="outline" className="rounded-full text-[10px]">
+                                  {tag}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
-                        <p className="mt-2 inline-flex rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium">
-                          【{variantFocus}】重視
-                        </p>
-                        <p className="mt-3 text-sm leading-7 text-foreground">{text}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {adviceHint ? (
-                <div className="border-l-2 border-dashed border-border/50 pl-3 text-xs text-muted-foreground">
-                  メモ: {adviceHint}
-                </div>
-              ) : null}
-
-              {resultMode === "single" && hashtags.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {hashtags.map((tag) => (
-                    <Badge key={tag} variant="outline" className="rounded-full text-[11px]">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              ) : null}
-
-              {memoryTags.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {memoryTags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="rounded-full">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              ) : null}
-
-              {resultMode === "single" && variants.length === 3 ? (
-                <div className="space-y-4 rounded-2xl border border-border/15 bg-muted/10 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">検証フィードバック</p>
-                      <p className="mt-1 text-sm text-muted-foreground">反応を残すと、次回の精度向上に使われます。</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant={quickFeedback === "hot" ? "default" : "outline"}
-                        size="sm"
-                        disabled={!currentId || feedbackSaving}
-                        onClick={() => handleQuickFeedback("hot")}
-                      >
-                        反応あり
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={quickFeedback === "cold" ? "default" : "outline"}
-                        size="sm"
-                        disabled={!currentId || feedbackSaving}
-                        onClick={() => handleQuickFeedback("cold")}
-                      >
-                        刺さらず
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-[140px_minmax(0,1fr)_auto] md:items-end">
-                    <label className="space-y-2">
-                      <span className="text-xs font-semibold tracking-wide text-muted-foreground">いいね数</span>
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="numeric"
-                        value={likesInput}
-                        onChange={(event) => setLikesInput(event.target.value)}
-                        className="h-10 w-full rounded-xl border-0 bg-muted/40 px-3 text-sm outline-none"
-                        placeholder="例: 23"
-                      />
-                    </label>
-                    <label className="space-y-2">
-                      <span className="text-xs font-semibold tracking-wide text-muted-foreground">検証メモ</span>
-                      <Textarea
-                        value={memoInput}
-                        onChange={(event) => setMemoInput(event.target.value)}
-                        className="min-h-10 resize-y border-0 bg-muted/40 shadow-none"
-                        placeholder="投稿時間、反応の質、次に変えたい点など"
-                      />
-                    </label>
-                    <Button type="button" variant="outline" disabled={!currentId || feedbackSaving} onClick={handleSaveValidationMemo}>
-                      {feedbackSaving ? "保存中…" : "保存する"}
-                    </Button>
+                      );
+                    })}
                   </div>
                 </div>
-              ) : null}
+              </div>
+
             </div>
 
-            <div className="shrink-0 space-y-4 border-t border-border/15 bg-muted/15 px-5 py-4">
-              <div className="rounded-xl bg-background/60 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground ring-1 ring-border/20">
-                <span className="font-medium text-foreground">生存シミュレーション（参照）</span>
-                ：このセットでデプロイした場合の検証レンジ目安として、次の観測スロットに余裕が生まれる想定を{" "}
-                <span className="font-semibold tabular-nums text-foreground">+約{survivalBoostDays}日</span> と仮定しています（演出用の簡易モデルです）。
-              </div>
+            <div className="shrink-0 border-t border-border/15 bg-muted/15 px-5 py-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={() => setResultsModalOpen(false)}>
-                  閉じて戦略を練り直す
+                <Button type="button" variant="outline" onClick={handleDiscardGeneratedPlan}>
+                  この作戦を破棄する（戦略を練り直す）
                 </Button>
-                <Link
-                  href="/vault"
-                  onClick={() => setResultsModalOpen(false)}
+                <Button
+                  type="button"
+                  disabled={!lastSavedSeries}
+                  onClick={() => handleDeployToRoadmap()}
                   className={cn(
                     buttonVariants({ variant: "default" }),
-                    "inline-flex h-8 w-full items-center justify-center rounded-lg sm:w-auto",
+                    "h-8 w-full sm:w-auto",
                     "bg-linear-to-r from-fuchsia-600 via-violet-600 to-purple-600 text-white hover:from-fuchsia-500 hover:via-violet-500 hover:to-purple-500",
                   )}
                 >
-                  Vault で確認する
-                </Link>
+                  Roadmap にデプロイする
+                </Button>
               </div>
             </div>
           </div>

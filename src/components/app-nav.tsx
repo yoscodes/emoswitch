@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Archive, Fingerprint, Home, Zap } from "lucide-react";
+import { Fingerprint, Home, Map, Zap } from "lucide-react";
 import { motion } from "framer-motion"; // アニメーション用
 
 import { AuthActions } from "@/components/auth-actions";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 const links = [
   { href: "/lab", label: "種", icon: Home },
-  { href: "/vault", label: "反応", icon: Archive },
+  { href: "/roadmap", label: "作戦", icon: Map },
   { href: "/identity", label: "Identity", icon: Fingerprint },
 ] as const;
 

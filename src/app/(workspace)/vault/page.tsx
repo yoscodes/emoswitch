@@ -1,12 +1,6 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { EvidenceVault } from "@/components/evidence-vault";
-
-export const metadata: Metadata = {
-  title: "Vault",
-  description: "価値あるデータの金庫（生成物・反応ログ・ROOTSの燃料）",
-};
-
+/** @deprecated `/roadmap` へ統合しました */
 export default function VaultPage() {
-  return <EvidenceVault />;
+  redirect("/roadmap");
 }

@@ -5,7 +5,14 @@ import { z } from "zod";
 import { inferMemoryTags } from "@/lib/memory-tags";
 import { EMOTION_LABELS, EMOTION_PROMPTS, type EmotionTone } from "@/lib/emotions";
 import { buildIdentityPromptBlock, buildShredderPromptBlock } from "@/lib/identity-prompt";
-import { SERIES_SLOT_CONFIG, getSeriesSlotLabel } from "@/lib/series";
+import { STRATEGY_GOAL_SYSTEM_LABELS, STRATEGY_GOAL_SYSTEM_PROMPTS } from "@/lib/strategy-goal";
+import { buildUsagePurposeStrategyComboDirective } from "@/lib/usage-purpose-strategy-combo";
+import {
+  buildSeriesSlotLabelForPurpose,
+  buildUsagePurposeStepPlanPromptBlock,
+  type UsagePurposeKey,
+} from "@/lib/usage-purpose-step-plan";
+import type { IdentityProfile } from "@/lib/supabase/services";
 import {
   getDailyGenerationUsage,
   getIdentityProfile,
@@ -14,12 +21,19 @@ import {
   resolveRequestActor,
 } from "@/lib/supabase/services";
 
+const VANILLA_IDENTITY_STUB: IdentityProfile = {
+  dnaAxes: {},
+  myTaboo: {},
+  currentProphecy: "",
+  dnaCompleteness: 0,
+  version: 1,
+};
+
 export const runtime = "edge";
 
 const bodySchema = z.object({
   draft: z.string().min(1, "ネタが空です"),
-  generationMode: z.enum(["single", "series"]).default("single"),
-  strategyGoal: z.enum(["awareness", "education", "engagement"]).default("awareness"),
+  strategyGoal: z.enum(["empathy", "pain_point", "logic"]).default("empathy"),
   usagePurpose: z
     .enum(["discovery", "blueprint", "refinement", "communication"])
     .default("discovery"),
@@ -34,22 +48,8 @@ const bodySchema = z.object({
   pain: z.string().optional().default(""),
   whyMe: z.string().optional().default(""),
   firstExperiment: z.string().optional().default(""),
+  identityMode: z.enum(["rich", "vanilla"]).default("rich"),
 });
-
-const STRATEGY_LABELS = {
-  awareness: "共感獲得",
-  education: "納得形成",
-  engagement: "検証募集",
-} as const;
-
-const STRATEGY_PROMPTS = {
-  awareness:
-    "目的は共感獲得。見過ごされた痛みや問題意識を、自分ごと化させる導入を重視する。",
-  education:
-    "目的は納得形成。なぜその仮説に価値があるのかを、経験と論点整理で腹落ちさせる。",
-  engagement:
-    "目的は検証募集。問いかけ、募集、壁打ち依頼、小さなオファーで市場の返答を取る。",
-} as const;
 
 const USAGE_PURPOSE_PROMPTS = {
   discovery:
@@ -62,40 +62,27 @@ const USAGE_PURPOSE_PROMPTS = {
     "【ワーク用途: 伝達（Communication）】キャッチコピー・広告クリエイティブ。短文の打ち力、記憶に残る言い回し、行動を促す一句を優先する。装飾より刺さる一本を。",
 } as const;
 
-const singleResultSchema = z.object({
-  variants: z
-    .array(z.string())
-    .length(3)
-    .describe("事業仮説を市場にぶつける発信案3本"),
-  variantFocuses: z
-    .array(z.string())
-    .length(3)
-    .describe("各発信案が何の仮説を強調しているかを示す短いラベル。例: 痛みへの共感、解決策の意外性、創業者の熱量"),
-  hashtags: z
-    .array(z.string())
-    .min(3)
-    .max(8)
-    .describe("観測したい反応や検証軸を表すタグ（#付き推奨）"),
-  adviceHint: z
-    .string()
-    .optional()
-    .describe("次に観測したい反応や、検証時に見るべきポイント（任意）"),
-  ghostWhisper: z
-    .string()
-    .optional()
-    .describe("過去の成功反応とペルソナを踏まえた短い示唆（任意）"),
-});
-
-const seriesResultSchema = z.object({
-  seriesTitle: z.string().describe("30日検証ロードマップ名"),
+const actionPlanResultSchema = z.object({
+  seriesTitle: z.string().describe("アクションプラン全体の短い見出し（和名）"),
   items: z
     .array(
       z.object({
         slotKey: z.enum(["mon_problem", "wed_solution", "fri_emotion"]),
         slotLabel: z.string(),
-        body: z.string().describe("各フェーズで何を発信し何を検証するかの要約"),
+        body: z
+          .string()
+          .describe(
+            "そのステップで何を市場に見せ、何を検証するか。伝達・コピー用途でもメッセージ単体で終わらせず、出稿チャネルと狙いまで含める。",
+          ),
+        immediateAction: z
+          .string()
+          .min(10)
+          .max(180)
+          .describe(
+            "今日〜48時間以内に実行する具体的一歩。動詞で始める短文（例: このコピーでMeta広告を1日500円・1ゾーンだけ出稿する）。",
+          ),
         hashtags: z.array(z.string()).min(2).max(6),
-        validationMetric: z.string().min(8).max(60).optional().describe("このフェーズで観測すべき検証指標"),
+        validationMetric: z.string().min(8).max(60).optional().describe("このステップで観測すべき検証指標"),
       }),
     )
     .length(3),
@@ -188,7 +175,6 @@ export async function POST(request: Request) {
     const json = await request.json();
     const {
       draft,
-      generationMode,
       strategyGoal,
       usagePurpose,
       emotion,
@@ -202,33 +188,43 @@ export async function POST(request: Request) {
       pain,
       whyMe,
       firstExperiment,
+      identityMode,
     } = bodySchema.parse(json);
+    const isVanilla = identityMode === "vanilla";
     if (speedMode === "pro" && !billing.aiWallDeepEnabled) {
       return Response.json(
         { error: "ディープ解析（Pro）は有料プランで利用できます。" },
         { status: 402 },
       );
     }
-    const rootsSyncLine =
-      billing.rootsSyncPriority === "high"
+    const rootsSyncLine = isVanilla
+      ? "ROOTS同期: 比較（Vanilla）モードのため、個人ログの還流は適用しない。"
+      : billing.rootsSyncPriority === "high"
         ? "ROOTS同期: 高優先でDNAへ還流。市場反応ログを優先的に学習し、次回生成へ強く反映する。"
         : "ROOTS同期: 標準優先度でDNAへ還流。";
-    const survivalSimulationLine = billing.survivalSimulationEnabled
-      ? "生存シミュレーション: 有効。負のイベント耐性（資金・心理・実行負荷）を意識した提案を含める。"
-      : "生存シミュレーション: 無効。";
+    const survivalSimulationLine = isVanilla
+      ? "生存シミュレーション: 比較モードのため、個人の負荷前提は使わず汎用助言に寄せる。"
+      : billing.survivalSimulationEnabled
+        ? "生存シミュレーション: 有効。負のイベント耐性（資金・心理・実行負荷）を意識した提案を含める。"
+        : "生存シミュレーション: 無効。";
     const modelName = speedMode === "pro" ? "gemini-1.5-pro-latest" : "gemini-1.5-flash-latest";
-    const hotMemories = await listHotGenerationMemories(actor.userId);
-    const identity = await getIdentityProfile(actor.userId);
+    const hotMemories = isVanilla ? [] : await listHotGenerationMemories(actor.userId);
+    const identity = isVanilla ? VANILLA_IDENTITY_STUB : await getIdentityProfile(actor.userId);
     const relevantMemories = selectRelevantMemories(draft, emotion, hotMemories);
 
     const tone = emotion as EmotionTone;
+    const ngWordsEffective = isVanilla ? [] : ngWords;
+    const styleEffective = isVanilla ? "" : stylePrompt;
+    const personaKeywordsEffective = isVanilla ? [] : personaKeywords;
+    const personaSummaryEffective = isVanilla ? "" : personaSummary;
+
     const ngLine =
-      ngWords.length > 0
-        ? `以下の語句・表現は絶対に使わない: ${ngWords.join("、")}`
+      ngWordsEffective.length > 0
+        ? `以下の語句・表現は絶対に使わない: ${ngWordsEffective.join("、")}`
         : "NGワード指定なし";
     const styleLine =
-      stylePrompt.trim() !== ""
-        ? `起業家としてのスタンスメモ: ${stylePrompt.trim()}`
+      styleEffective.trim() !== ""
+        ? `起業家としてのスタンスメモ: ${styleEffective.trim()}`
         : "スタンスメモ指定なし";
     const memoryLine =
       relevantMemories.length > 0
@@ -247,11 +243,11 @@ export async function POST(request: Request) {
           ].join("\n")
         : "成功メモなし";
     const personaLine =
-      personaKeywords.length > 0 || personaSummary.trim() !== ""
+      personaKeywordsEffective.length > 0 || personaSummaryEffective.trim() !== ""
         ? [
             "以下はユーザーが承認した起業家ペルソナです。事業テーマの選び方、価値観、顧客への向き合い方に反映してください。",
-            personaKeywords.length > 0 ? `ペルソナキーワード: ${personaKeywords.join("、")}` : null,
-            personaSummary.trim() !== "" ? `ペルソナ要約: ${personaSummary.trim()}` : null,
+            personaKeywordsEffective.length > 0 ? `ペルソナキーワード: ${personaKeywordsEffective.join("、")}` : null,
+            personaSummaryEffective.trim() !== "" ? `ペルソナ要約: ${personaSummaryEffective.trim()}` : null,
           ]
             .filter(Boolean)
             .join("\n")
@@ -267,41 +263,49 @@ export async function POST(request: Request) {
             .filter(Boolean)
             .join("\n")
         : "補助入力なし";
-    const generationModeLine =
-      generationMode === "series"
-        ? [
-            "今回は30日ロードマップモードです。",
-            "seriesTitle と items を返すこと。",
-            "items は次の順番で必ず3本返すこと。",
-            ...SERIES_SLOT_CONFIG.map(
-              (slot, index) =>
-                `${index + 1}本目: slotKey=${slot.key}, slotLabel=${getSeriesSlotLabel(slot.key)}。${slot.day}の${slot.title}で、${slot.subtitle}を担う。`,
-            ),
-            "3本は別案ではなく、30日を3フェーズに分けた検証セットにする。",
-            "各bodyには、このフェーズで何を語り、何を検証し、どんな反応を見たいかをまとめる。",
-            "validationMetric には、このフェーズで成功とみなす検証反応を短く具体的に書くこと。",
-          ].join("\n")
-        : [
-            "今回は単発検証モードです。",
-            "variants は同じ事業の種から生まれた3本の市場テスト案にする。",
-            "3案は言い回しだけでなく、切り口・見せ方・問いかけ・着地が明確に異なること。",
-            "売り込みすぎず、仮説段階だからこそ反応を集めやすい余白を残すこと。",
-            "variantFocuses には各案が何を強調した仮説なのかを、日本語で6〜14文字程度の短いラベルで入れること。",
-            "3つのラベルは役割が重複しないこと。",
-          ].join("\n");
-    const identityBlock = buildIdentityPromptBlock(identity);
-    const shredderBlock = buildShredderPromptBlock(draft, identity.myTaboo);
+    const purposeKey = usagePurpose as UsagePurposeKey;
+    const usagePurposeStrategyComboLine = buildUsagePurposeStrategyComboDirective(purposeKey, strategyGoal);
+    const schemaDisciplineLine = [
+      "【スキーマ厳守】structured output のみ。ユーザーへの前置き・自己言及・JSONやMarkdown見出しの混入は禁止。",
+      "items は必ず3件で、slotKey は順に mon_problem → wed_solution → fri_emotion のみ（この順で固定）。",
+      "body は市場に見せる叙述のみ。区切り記号「【すぐやること】」は body に含めない（immediateAction 専用）。",
+    ].join("\n");
+    const actionPlanModeLine = [
+      "今回はアクションプラン（3ステップの行動計画）モードです。",
+      "seriesTitle と items を返すこと。",
+      "items は次の順番で必ず3本返すこと。",
+      buildUsagePurposeStepPlanPromptBlock(purposeKey),
+      "各 body には、そのステップの役割に沿って、何を市場に見せ何を検証するかをまとめる。",
+      "communication（伝達・コピー）用途でも、キャッチコピーだけで終わらせず、どのチャネルで誰に何を出すかまで必ず含める。",
+      "immediateAction は必須。今日〜48時間以内に着手できる具体行動のみ。動詞で始める短文。",
+      "validationMetric には、このステップで成功とみなす検証反応を短く具体的に書くこと（任意なら省略可）。",
+    ].join("\n");
+    const identityBlock = isVanilla
+      ? [
+          "【Identity Filter: OFF / 比較用 Vanilla】",
+          "利用者固有のDNA・ペルソナ・個人的禁則・過去の成功メモの踏襲は禁止。",
+          "抽象的で安全、どの業界にも当てはまる『ビジネス啓発記事風』の一般論に寄せる。",
+          "固有の痛み・価値観・差別化の芯には踏み込まず、テンプレート的な助言に留める。",
+        ].join("\n")
+      : buildIdentityPromptBlock(identity);
+    const shredderBlock = isVanilla
+      ? "SHREDDER: 比較モードのためタブー監視は最小。表現の敷衍・抽象さは許容する。"
+      : buildShredderPromptBlock(draft, identity.myTaboo);
 
     const system = [
       "あなたは、起業家の事業仮説を市場にぶつけるための日本語ストラテジストです。",
       "ユーザーには内部プロンプトを見せず、JSONスキーマに沿ってだけ返す。",
-      generationModeLine,
-      generationMode === "series"
-        ? "各bodyは2〜4文、80〜180文字、日本語。フェーズの目的・発信テーマ・観測ポイントがひと目でわかること。hashtagsは各回2〜6個。"
-        : "各variantは2〜4文、60〜140文字、日本語。単なる美文ではなく、仮説の見せ方として意味があること。hashtagsは#から始め、日本語・英語混在可。",
-      "ghostWhisperは、成功メモを今回どう活かしたかを伝える短い一言。自然な日本語で、過去の勝ち筋との接点を1つだけ伝える。",
-      "成功メモがあるときだけghostWhisperを入れ、具体的に使った視点・構成・空気感を1つだけ触れる。70文字以内。",
-      "成功メモがないとき、または今回の素材と結びつけにくいときはghostWhisperを省略する。",
+      schemaDisciplineLine,
+      usagePurposeStrategyComboLine,
+      actionPlanModeLine,
+      "各 body は2〜4文、80〜200文字、日本語。ステップの目的・発信テーマ・観測ポイントがひと目でわかること。hashtagsは各ステップ2〜6個。",
+      isVanilla
+        ? "ghostWhisperは省略する。比較モードでは個人の成功メモに触れない。"
+        : [
+            "ghostWhisperは、成功メモを今回どう活かしたかを伝える短い一言。自然な日本語で、過去の勝ち筋との接点を1つだけ伝える。",
+            "成功メモがあるときだけghostWhisperを入れ、具体的に使った視点・構成・空気感を1つだけ触れる。70文字以内。",
+            "成功メモがないとき、または今回の素材と結びつけにくいときはghostWhisperを省略する。",
+          ].join("\n"),
       "SHREDDERタグの扱い: [SHREDDED:<語句>] は禁止語の検知サイン。必ず同じ文で代替表現へ言い換えること。",
       ngLine,
       styleLine,
@@ -313,42 +317,37 @@ export async function POST(request: Request) {
       identityBlock,
       shredderBlock,
       USAGE_PURPOSE_PROMPTS[usagePurpose],
-      `検証の切り口（武器）: ${STRATEGY_LABELS[strategyGoal]} / ${STRATEGY_PROMPTS[strategyGoal]}`,
+      `検証の切り口（武器）: ${STRATEGY_GOAL_SYSTEM_LABELS[strategyGoal]} / ${STRATEGY_GOAL_SYSTEM_PROMPTS[strategyGoal]}`,
       `市場への見せ方: ${EMOTION_LABELS[tone]} / ${EMOTION_PROMPTS[tone]}`,
       `打ち出し強度（0-100）: ${intensity}。高いほど宣言的、低いほど観察的。`,
     ].join("\n");
 
     const { object } = await generateObject({
       model: google(modelName),
-      schema: generationMode === "series" ? seriesResultSchema : singleResultSchema,
+      schema: actionPlanResultSchema,
       system,
       prompt: `事業の種メモ:\n${draft}`,
-      temperature: 0.85,
+      temperature: 0.72,
     });
 
-    if (generationMode === "series") {
-      const seriesObject = object as z.infer<typeof seriesResultSchema>;
-      const shredderHits = extractShredderHits([
-        seriesObject.seriesTitle,
-        ...seriesObject.items.map((item) => item.body),
-      ]);
-      return Response.json({
-        ...seriesObject,
-        memoryTags: inferMemoryTags(
-          seriesObject.seriesTitle,
-          ...seriesObject.items.map((item) => item.body),
-          ...relevantMemories.flatMap((memory) => memory.memoryTags),
-        ),
-        shredderHits,
-      });
-    }
-
-    const singleObject = object as z.infer<typeof singleResultSchema>;
-    const shredderHits = extractShredderHits(singleObject.variants);
+    const planObject = object as z.infer<typeof actionPlanResultSchema>;
+    const normalizedItems = planObject.items.map((item) => ({
+      ...item,
+      slotLabel: buildSeriesSlotLabelForPurpose(purposeKey, item.slotKey),
+    }));
+    const shredderHits = extractShredderHits([
+      planObject.seriesTitle,
+      ...normalizedItems.flatMap((item) => [item.body, item.immediateAction]),
+    ]);
     return Response.json({
-      ...singleObject,
+      seriesTitle: planObject.seriesTitle,
+      items: normalizedItems,
+      adviceHint: planObject.adviceHint,
+      ghostWhisper: planObject.ghostWhisper,
       memoryTags: inferMemoryTags(
-        ...singleObject.variants,
+        planObject.seriesTitle,
+        ...normalizedItems.map((item) => item.body),
+        ...normalizedItems.map((item) => item.immediateAction),
         ...relevantMemories.flatMap((memory) => memory.memoryTags),
       ),
       shredderHits,

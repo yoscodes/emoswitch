@@ -9,7 +9,6 @@ export const runtime = "edge";
 const bodySchema = z.object({
   draft: z.string().min(1),
   refinementAnswer: z.string().optional().default(""),
-  generationMode: z.enum(["single", "series"]).default("single"),
   emotion: z.enum(["empathy", "toxic", "mood", "useful", "minimal"]),
   intensity: z.number().min(0).max(100).default(50),
   personaKeywords: z.array(z.string()).optional().default([]),
@@ -51,7 +50,6 @@ export async function POST(request: Request) {
     const {
       draft,
       refinementAnswer,
-      generationMode,
       emotion,
       intensity,
       personaKeywords,
@@ -110,7 +108,7 @@ export async function POST(request: Request) {
       prompt: [
         `事業の種:\n${draft.trim()}`,
         refinementAnswer.trim() !== "" ? `AIの問いへの追加回答:\n${refinementAnswer.trim()}` : null,
-        `戦い方: ${generationMode === "series" ? "30日物語" : "単発検証"}`,
+        "戦い方: アクションプラン（3ステップの行動計画）",
         `市場への見せ方: ${emotion}`,
         `強度: ${intensity}`,
         strategyLabel.trim() !== "" ? `戦略タイル: ${strategyLabel.trim()}` : null,

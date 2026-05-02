@@ -8,9 +8,9 @@ export type SeriesSlotConfig = {
 };
 
 export const SERIES_SLOT_CONFIG: SeriesSlotConfig[] = [
-  { key: "mon_problem", day: "PHASE 1", title: "共感獲得", subtitle: "なぜこの課題を扱うのか" },
-  { key: "wed_solution", day: "PHASE 2", title: "権威性証明", subtitle: "どう解けるのかを示す" },
-  { key: "fri_emotion", day: "PHASE 3", title: "検証募集", subtitle: "仲間と反応を集める" },
+  { key: "mon_problem", day: "STEP 1", title: "仮説の核を撃つ", subtitle: "小さく出して最初の反応を取る" },
+  { key: "wed_solution", day: "STEP 2", title: "問いを鍛える", subtitle: "観測して次の改善ループへ" },
+  { key: "fri_emotion", day: "STEP 3", title: "成果を言語化する", subtitle: "学びを固定し次につなぐ" },
 ];
 
 export function getSeriesSlotLabel(slotKey: SeriesSlotKey): string {

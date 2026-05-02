@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** @deprecated `/vault` へ移行しました */
+/** @deprecated `/roadmap` へ統合しました */
 export default function LegacyArchivePage() {
-  redirect("/vault");
+  redirect("/roadmap");
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { DATA_SYNC_EVENT } from "@/lib/data-sync";
 import { listGenerations } from "@/lib/generation-storage";
 import { loadGhostSettings } from "@/lib/ghost-storage";
 import { supabase } from "@/lib/supabase/client";
@@ -14,9 +15,10 @@ import type {
   UserProfileSettings,
 } from "@/lib/types";
 import type { SeriesSlotKey } from "@/lib/series";
+import type { StrategyGoal } from "@/lib/strategy-goal";
 
 const STORAGE_MIGRATION_FLAG = "emoswitch_supabase_migrated_v1";
-export const DATA_SYNC_EVENT = "emoswitch:data-sync";
+export { DATA_SYNC_EVENT };
 
 let bootstrapPromise: Promise<void> | null = null;
 
@@ -115,10 +117,11 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
 
 export type UsagePurpose = "discovery" | "blueprint" | "refinement" | "communication";
 
+export type { StrategyGoal };
+
 export type GenerateTriplePayload = {
   draft: string;
-  generationMode: "single" | "series";
-  strategyGoal: "awareness" | "education" | "engagement";
+  strategyGoal: StrategyGoal;
   usagePurpose: UsagePurpose;
   emotion: "empathy" | "toxic" | "mood" | "useful" | "minimal";
   speedMode: "flash" | "pro";
@@ -131,21 +134,16 @@ export type GenerateTriplePayload = {
   pain?: string;
   whyMe?: string;
   firstExperiment?: string;
-};
-
-export type GenerateSingleResponse = {
-  variants: string[];
-  variantFocuses: string[];
-  hashtags: string[];
-  adviceHint?: string;
-  ghostWhisper?: string;
-  memoryTags?: string[];
+  /** rich: ペルソナ・Identity・成功メモを反映。vanilla: 比較用に汎用トーンへ寄せる */
+  identityMode?: "rich" | "vanilla";
 };
 
 export type GenerateSeriesItem = {
   slotKey: SeriesSlotKey;
   slotLabel: string;
   body: string;
+  /** 生成直後のみ。保存時は body にマージされることがある */
+  immediateAction?: string;
   hashtags: string[];
   validationMetric?: string;
 };
@@ -158,12 +156,11 @@ export type GenerateSeriesResponse = {
   memoryTags?: string[];
 };
 
-export type GenerateTripleResponse = GenerateSingleResponse | GenerateSeriesResponse;
+export type GenerateTripleResponse = GenerateSeriesResponse;
 
 export type HypothesisCanvasPayload = {
   draft: string;
   refinementAnswer?: string;
-  generationMode: "single" | "series";
   emotion: "empathy" | "toxic" | "mood" | "useful" | "minimal";
   intensity: number;
   personaKeywords?: string[];

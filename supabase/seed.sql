@@ -283,3 +283,99 @@ values
     timezone('utc', now()) - interval '1 day'
   )
 on conflict do nothing;
+
+-- Roadmap 用: Lab 連載（3ステップ）のデモ作戦（demo ユーザー）。bootstrap と同じ UUID で一覧・デプロイの整合を取りやすくする。
+insert into public.generation_series (
+  id,
+  user_id,
+  title,
+  source_draft,
+  emotion,
+  intensity,
+  speed_mode,
+  advice_hint,
+  ghost_whisper,
+  quick_feedback,
+  memory_tags,
+  created_at,
+  updated_at
+)
+values (
+  '44444444-4444-4444-8444-444444444441',
+  '11111111-1111-4111-8111-111111111111',
+  '[連載] 続かない発信を立て直す3本',
+  '発信を続けたいのに、途中で気力が切れて止まってしまう。',
+  'empathy',
+  45,
+  'pro',
+  '連載は温度差を付けると、週の流れとして読まれやすくなります。',
+  '以前伸びた問いかけ導入を月曜に混ぜ、金曜は本音で締めています。',
+  'hot',
+  array['問いかけ始まり', '共感導入', '本音吐露'],
+  timezone('utc', now()) - interval '2 days',
+  timezone('utc', now()) - interval '2 days'
+)
+on conflict (id) do nothing;
+
+insert into public.generation_series_items (
+  id,
+  series_id,
+  user_id,
+  slot_key,
+  slot_label,
+  body,
+  hashtags,
+  quick_feedback,
+  likes,
+  memo,
+  memory_tags,
+  created_at,
+  updated_at
+)
+values
+  (
+    '55555555-5555-4555-8555-555555555551',
+    '44444444-4444-4444-8444-444444444441',
+    '11111111-1111-4111-8111-111111111111',
+    'mon_problem',
+    'STEP 1 | 仮説の核を撃つ（小さく出して最初の反応を取る）',
+    '発信が続かないのは、意思が弱いからじゃなくて、毎回ゼロから気持ちを作っているからかもしれない。',
+    array['#発信', '#継続', '#SNS運用'],
+    'hot',
+    88,
+    '月曜朝に投稿。保存が多かった。',
+    array['問いかけ始まり', '共感導入'],
+    timezone('utc', now()) - interval '2 days',
+    timezone('utc', now()) - interval '2 days'
+  ),
+  (
+    '55555555-5555-4555-8555-555555555552',
+    '44444444-4444-4444-8444-444444444441',
+    '11111111-1111-4111-8111-111111111111',
+    'wed_solution',
+    'STEP 2 | 問いを鍛える（観測して次の改善ループへ）',
+    '続けるコツは、ネタを増やすことより「次に何を書くか」を先に1本決めておくこと。',
+    array['#発信', '#習慣化', '#SNS運用'],
+    null,
+    24,
+    '水曜昼。反応は普通。',
+    array[]::text[],
+    timezone('utc', now()) - interval '2 days',
+    timezone('utc', now()) - interval '2 days'
+  ),
+  (
+    '55555555-5555-4555-8555-555555555553',
+    '44444444-4444-4444-8444-444444444441',
+    '11111111-1111-4111-8111-111111111111',
+    'fri_emotion',
+    'STEP 3 | 成果を言語化する（学びを固定し次につなぐ）',
+    'ほんとは止まりたくなかった。だから今週も1本でも出せた自分を、ちゃんと褒めて終わりたい。',
+    array['#発信', '#本音', '#金曜の言葉'],
+    'hot',
+    67,
+    '金曜夜に伸びた。',
+    array['本音吐露', '余韻締め'],
+    timezone('utc', now()) - interval '2 days',
+    timezone('utc', now()) - interval '2 days'
+  )
+on conflict (id) do nothing;

@@ -5,6 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, CheckCircle2, Fingerprint, Flame, Scissors, ShieldBan, Sparkles } from "lucide-react";
 
 import { analyzePersona, fetchArchiveInsights, fetchGhostSettings, updateGhostSettings } from "@/lib/api-client";
+import { DATA_SYNC_EVENT } from "@/lib/data-sync";
+import {
+  clearIdentityFieldLog,
+  readIdentityFieldLog,
+  summarizeIdentityFieldBuffer,
+} from "@/lib/roadmap-deploy";
 import { useAuthSession } from "@/lib/use-auth-session";
 import type { ArchiveInsights, GhostSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -233,6 +239,23 @@ export function IdentityLabPage() {
   const [activeTuningId, setActiveTuningId] = useState<DnaQuestionId | null>(null);
   const [previewFlash, setPreviewFlash] = useState(false);
   const [tabooQuickInput, setTabooQuickInput] = useState("");
+  const [roadmapFieldBuffer, setRoadmapFieldBuffer] = useState(() => readIdentityFieldLog());
+
+  const refreshRoadmapFieldBuffer = useCallback(() => {
+    setRoadmapFieldBuffer(readIdentityFieldLog());
+  }, []);
+
+  useEffect(() => {
+    refreshRoadmapFieldBuffer();
+    if (typeof window === "undefined") return;
+    window.addEventListener(DATA_SYNC_EVENT, refreshRoadmapFieldBuffer);
+    return () => window.removeEventListener(DATA_SYNC_EVENT, refreshRoadmapFieldBuffer);
+  }, [refreshRoadmapFieldBuffer]);
+
+  const roadmapBufferSummary = useMemo(
+    () => summarizeIdentityFieldBuffer(roadmapFieldBuffer),
+    [roadmapFieldBuffer],
+  );
 
   const applySettingsToView = useCallback((next: GhostSettings) => {
     const controls = parsePersonaControls(next.manualPosts);
@@ -509,6 +532,7 @@ export function IdentityLabPage() {
         personaLastAnalyzedHotCount: totalHot,
       });
       applySettingsToView(next);
+      clearIdentityFieldLog();
       setSyncGlow(true);
       if (typeof window !== "undefined") {
         sessionStorage.setItem("emoswitch_identity_sync_glow", String(Date.now()));
@@ -587,6 +611,48 @@ export function IdentityLabPage() {
                 `/lab` 検証数 {totalHomeSignals}
               </Badge>
             </div>
+            {roadmapBufferSummary.total > 0 ? (
+              <div className="max-w-3xl space-y-3 rounded-2xl border border-violet-200/80 bg-violet-50/50 p-4 text-sm dark:border-violet-800/50 dark:bg-violet-950/20">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold tracking-wide text-violet-900 dark:text-violet-100">
+                    Roadmap 還流バッファ（未反映）
+                  </p>
+                  <Badge variant="outline" className="rounded-full border-violet-300/80 text-[10px] dark:border-violet-700/60">
+                    {roadmapBufferSummary.total}件 · 🔥{roadmapBufferSummary.hot} · 刺さらず{roadmapBufferSummary.cold}
+                    {roadmapBufferSummary.withMemo > 0 ? ` · メモ${roadmapBufferSummary.withMemo}` : ""}
+                  </Badge>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  `/roadmap` で「結果を送信」した Hot / Cold / メモがここに積まれます。DNA やタブーを手で直したあと「確認済み」で空にするか、承認保存時に自動で空になります。
+                </p>
+                <ul className="max-h-40 space-y-2 overflow-y-auto text-xs text-foreground/90">
+                  {roadmapFieldBuffer.slice(-8).map((entry) => (
+                    <li key={`${entry.at}-${entry.itemId}`} className="rounded-lg border border-violet-200/40 bg-background/60 px-2 py-1.5 dark:border-violet-800/40">
+                      <span className="font-medium text-muted-foreground">
+                        {entry.quickFeedback === "hot" ? "🔥" : entry.quickFeedback === "cold" ? "刺さらず" : "—"}
+                      </span>
+                      {entry.memo?.trim() ? (
+                        <span className="ml-2 text-muted-foreground">「{entry.memo.trim().slice(0, 120)}{entry.memo.trim().length > 120 ? "…" : ""}」</span>
+                      ) : (
+                        <span className="ml-2 text-muted-foreground/70">メモなし</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="border-violet-300/80 text-violet-900 hover:bg-violet-100/80 dark:border-violet-700/60 dark:text-violet-100 dark:hover:bg-violet-950/40"
+                  onClick={() => {
+                    clearIdentityFieldLog();
+                    setRoadmapFieldBuffer([]);
+                  }}
+                >
+                  確認済みでバッファを空にする
+                </Button>
+              </div>
+            ) : null}
           </div>
           <div className="flex w-full min-w-0 flex-col gap-3 sm:max-w-xl sm:items-stretch">
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -639,7 +705,7 @@ export function IdentityLabPage() {
       </header>
 
       <div className="grid gap-7 xl:grid-cols-[0.82fr_1.32fr_1.02fr]">
-        <section className="space-y-6 xl:order-1">
+        <section className="space-y-6">
           <Card className="rounded-[30px] border-0 bg-white/58 shadow-none backdrop-blur-[2px] dark:bg-background/46">
             <CardHeader className="px-3 pb-3 md:px-4">
               <CardTitle>ROOTS</CardTitle>
@@ -757,11 +823,11 @@ export function IdentityLabPage() {
           </Card>
         </section>
 
-        <section className="space-y-6 xl:order-3">
+        <section className="space-y-6">
           <Card className="rounded-[30px] border-0 bg-white/60 shadow-none backdrop-blur-[2px] dark:bg-background/48">
             <CardHeader className="px-3 pb-3 md:px-4">
               <CardTitle>THE CORE</CardTitle>
-              <CardDescription>操作パネル: DNAを微調整して、称号を育てる</CardDescription>
+              <CardDescription>中央で DNA をチューニングすると、右のプレビューが即座に反応します。</CardDescription>
             </CardHeader>
             <CardContent className="border-t border-border/20 pt-3">
               <div className="grid gap-4 xl:grid-cols-[1.25fr_0.9fr]">
@@ -841,11 +907,11 @@ export function IdentityLabPage() {
           </Card>
         </section>
 
-        <section className="space-y-6 xl:order-2">
+        <section className="space-y-6">
           <Card className="rounded-[30px] border-0 bg-white/58 shadow-none backdrop-blur-[2px] dark:bg-background/46">
             <CardHeader className="px-3 pb-3 md:px-4">
               <CardTitle>PREVIEW LAB</CardTitle>
-              <CardDescription>スライダーを動かすと、文体変化が即時に反映されます。</CardDescription>
+              <CardDescription>THE CORE の結果として、称号・文体・拒絶フィルタのプレビューがここに集約されます。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-0 divide-y divide-border/20 border-t border-border/20 pt-2">
               <div className="px-3 py-5 md:px-4">
@@ -927,7 +993,7 @@ export function IdentityLabPage() {
                   <p className="mt-3 text-sm leading-7 text-violet-900/85 dark:text-violet-100/85">
                     {tuningSignals.length > 0
                       ? `現在のDNAシグナル: ${tuningSignals.join(" / ")}`
-                      : "THE COREでDNAを調整し、今日の出力キャラへ微調整してください。"}
+                      : "中央の THE CORE で DNA を調整すると、このカードのプレビューが先に動きます。"}
                   </p>
                   <div className="mt-3">
                     <Link href="/lab">

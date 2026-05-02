@@ -123,6 +123,8 @@ type DbArchiveInsightSeriesItemRow = {
 type DbHypothesisRow = {
   id: string;
   user_id: string;
+  legacy_source_type?: string | null;
+  legacy_source_id?: string | null;
   generation_mode: "single" | "series";
   seed_input: string;
   strategy_params: {
@@ -579,8 +581,10 @@ function deriveMemoFromLogs(logs: DbVaultLogRow[]): string | null {
 function mapSingleFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): GenerationRecord {
   const strategy = row.strategy_params ?? {};
   const output = row.output_content ?? {};
+  const canonicalId =
+    row.legacy_source_type === "generation" && row.legacy_source_id ? row.legacy_source_id : row.id;
   return {
-    id: row.id,
+    id: canonicalId,
     createdAt: row.created_at,
     generationMode: "single",
     draft: row.seed_input,
@@ -601,6 +605,8 @@ function mapSingleFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): G
 function mapSeriesFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): GenerationSeriesRecord {
   const strategy = row.strategy_params ?? {};
   const output = row.output_content ?? {};
+  const canonicalSeriesId =
+    row.legacy_source_type === "series" && row.legacy_source_id ? row.legacy_source_id : row.id;
   const itemLogMap = new Map<string, DbVaultLogRow[]>();
   for (const log of logs) {
     const seriesItemId = log.reaction_payload?.series_item_id;
@@ -612,7 +618,7 @@ function mapSeriesFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): G
   const rawItems = asArray(output.items);
   const items: GenerationSeriesItemRecord[] = rawItems.map((item, index) => ({
     id: item.id ?? `${row.id}:${item.slot_key ?? index}`,
-    seriesId: row.id,
+    seriesId: canonicalSeriesId,
     createdAt: item.created_at ?? row.created_at,
     slotKey: (item.slot_key ?? "mon_problem") as SeriesSlotKey,
     slotLabel: item.slot_label ?? getSeriesSlotLabel((item.slot_key ?? "mon_problem") as SeriesSlotKey),
@@ -638,7 +644,7 @@ function mapSeriesFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): G
   }));
 
   return {
-    id: row.id,
+    id: canonicalSeriesId,
     createdAt: row.created_at,
     generationMode: "series",
     title: output.title ?? strategy.title ?? "30日ロードマップ",
@@ -1418,48 +1424,11 @@ async function resolveScopedUserId(userId?: string): Promise<string> {
   return userId ?? (await ensureDemoUser());
 }
 
-export async function listGenerations(
-  userId?: string,
-  options?: { pivotOnly?: boolean },
-): Promise<GenerationRecord[]> {
-  const scopedUserId = await resolveScopedUserId(userId);
-  const pivotOnly = options?.pivotOnly ?? false;
-  const coverage = await getSchemaCoverage(scopedUserId);
-  const singleQuery = supabaseAdmin
-    .from("hypotheses")
-    .select(
-      "id, user_id, generation_mode, seed_input, strategy_params, output_content, status, created_at, updated_at, deleted_at",
-    )
-    .eq("user_id", scopedUserId)
-    .eq("generation_mode", "single")
-    .neq("status", "draft")
-    .is("deleted_at", null);
-  if (pivotOnly) {
-    singleQuery.is("legacy_source_type", null);
-  }
-  const { data: hypothesisRows, error: hypothesisError } = await singleQuery
-    .order("created_at", { ascending: false })
-    .overrideTypes<DbHypothesisRow[]>();
+function clearArchiveOverviewCache(): void {
+  archiveOverviewCache.clear();
+}
 
-  if (!hypothesisError && hypothesisRows.length > 0) {
-    const ids = hypothesisRows.map((row) => row.id);
-    const { data: logs, error: logsError } = await supabaseAdmin
-      .from("vault_logs")
-      .select("id, hypothesis_id, reaction_type, reaction_payload, created_at")
-      .eq("user_id", scopedUserId)
-      .in("hypothesis_id", ids)
-      .order("created_at", { ascending: false })
-      .overrideTypes<DbVaultLogRow[]>();
-    if (logsError) throw logsError;
-
-    const grouped = groupVaultLogsByHypothesis(logs ?? []);
-    return hypothesisRows.map((row) => mapSingleFromHypothesis(row, grouped.get(row.id) ?? []));
-  }
-
-  if (pivotOnly || !coverage.useLegacyFallback) {
-    return [];
-  }
-
+async function loadLegacyGenerationRecords(scopedUserId: string): Promise<GenerationRecord[]> {
   const { data, error } = await supabaseAdmin
     .from("generations")
     .select(
@@ -1471,51 +1440,10 @@ export async function listGenerations(
     .order("created_at", { ascending: false })
     .overrideTypes<DbGenerationRow[]>();
   if (error) throw error;
-  return data.map((row) => mapGeneration(row as DbGenerationRow));
+  return (data ?? []).map((row) => mapGeneration(row as DbGenerationRow));
 }
 
-export async function listGenerationSeries(
-  userId?: string,
-  options?: { pivotOnly?: boolean },
-): Promise<GenerationSeriesRecord[]> {
-  const scopedUserId = await resolveScopedUserId(userId);
-  const pivotOnly = options?.pivotOnly ?? false;
-  const coverage = await getSchemaCoverage(scopedUserId);
-  const seriesQuery = supabaseAdmin
-    .from("hypotheses")
-    .select(
-      "id, user_id, generation_mode, seed_input, strategy_params, output_content, status, created_at, updated_at, deleted_at",
-    )
-    .eq("user_id", scopedUserId)
-    .eq("generation_mode", "series")
-    .neq("status", "draft")
-    .is("deleted_at", null);
-  if (pivotOnly) {
-    seriesQuery.is("legacy_source_type", null);
-  }
-  const { data: hypothesisRows, error: hypothesisError } = await seriesQuery
-    .order("created_at", { ascending: false })
-    .overrideTypes<DbHypothesisRow[]>();
-
-  if (!hypothesisError && hypothesisRows.length > 0) {
-    const ids = hypothesisRows.map((row) => row.id);
-    const { data: logs, error: logsError } = await supabaseAdmin
-      .from("vault_logs")
-      .select("id, hypothesis_id, reaction_type, reaction_payload, created_at")
-      .eq("user_id", scopedUserId)
-      .in("hypothesis_id", ids)
-      .order("created_at", { ascending: false })
-      .overrideTypes<DbVaultLogRow[]>();
-    if (logsError) throw logsError;
-
-    const grouped = groupVaultLogsByHypothesis(logs ?? []);
-    return hypothesisRows.map((row) => mapSeriesFromHypothesis(row, grouped.get(row.id) ?? []));
-  }
-
-  if (pivotOnly || !coverage.useLegacyFallback) {
-    return [];
-  }
-
+async function loadLegacyGenerationSeriesRecords(scopedUserId: string): Promise<GenerationSeriesRecord[]> {
   const [{ data: seriesRows, error: seriesError }, { data: itemRows, error: itemsError }] = await Promise.all([
     supabaseAdmin
       .from("generation_series")
@@ -1539,13 +1467,107 @@ export async function listGenerationSeries(
   if (seriesError) throw seriesError;
   if (itemsError) throw itemsError;
   const itemsBySeries = new Map<string, DbSeriesItemRow[]>();
-  for (const row of itemRows) {
+  for (const row of itemRows ?? []) {
     const item = row as DbSeriesItemRow;
     const current = itemsBySeries.get(item.series_id) ?? [];
     current.push(item);
     itemsBySeries.set(item.series_id, current);
   }
-  return seriesRows.map((row) => mapSeries(row as DbSeriesRow, itemsBySeries.get(row.id) ?? []));
+  return (seriesRows ?? []).map((row) => mapSeries(row as DbSeriesRow, itemsBySeries.get(row.id) ?? []));
+}
+
+export async function listGenerations(
+  userId?: string,
+  options?: { pivotOnly?: boolean },
+): Promise<GenerationRecord[]> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const pivotOnly = options?.pivotOnly ?? false;
+  const singleQuery = supabaseAdmin
+    .from("hypotheses")
+    .select(
+      "id, user_id, generation_mode, seed_input, strategy_params, output_content, status, created_at, updated_at, deleted_at, legacy_source_type, legacy_source_id",
+    )
+    .eq("user_id", scopedUserId)
+    .eq("generation_mode", "single")
+    .neq("status", "draft")
+    .is("deleted_at", null);
+  if (pivotOnly) {
+    singleQuery.or("legacy_source_type.is.null,legacy_source_type.eq.generation");
+  }
+  const { data: hypothesisRows, error: hypothesisError } = await singleQuery
+    .order("created_at", { ascending: false })
+    .overrideTypes<DbHypothesisRow[]>();
+
+  let mappedFromHyp: GenerationRecord[] = [];
+  if (!hypothesisError && (hypothesisRows?.length ?? 0) > 0) {
+    const ids = hypothesisRows!.map((row) => row.id);
+    const { data: logs, error: logsError } = await supabaseAdmin
+      .from("vault_logs")
+      .select("id, hypothesis_id, reaction_type, reaction_payload, created_at")
+      .eq("user_id", scopedUserId)
+      .in("hypothesis_id", ids)
+      .order("created_at", { ascending: false })
+      .overrideTypes<DbVaultLogRow[]>();
+    if (logsError) throw logsError;
+
+    const grouped = groupVaultLogsByHypothesis(logs ?? []);
+    mappedFromHyp = hypothesisRows!.map((row) => mapSingleFromHypothesis(row, grouped.get(row.id) ?? []));
+  } else if (hypothesisError) {
+    throw hypothesisError;
+  }
+
+  const legacyMapped = await loadLegacyGenerationRecords(scopedUserId);
+  const mergedIds = new Set(mappedFromHyp.map((r) => r.id));
+  const merged = [...mappedFromHyp, ...legacyMapped.filter((r) => !mergedIds.has(r.id))];
+  merged.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return merged;
+}
+
+export async function listGenerationSeries(
+  userId?: string,
+  options?: { pivotOnly?: boolean },
+): Promise<GenerationSeriesRecord[]> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const pivotOnly = options?.pivotOnly ?? false;
+  const seriesQuery = supabaseAdmin
+    .from("hypotheses")
+    .select(
+      "id, user_id, generation_mode, seed_input, strategy_params, output_content, status, created_at, updated_at, deleted_at, legacy_source_type, legacy_source_id",
+    )
+    .eq("user_id", scopedUserId)
+    .eq("generation_mode", "series")
+    .neq("status", "draft")
+    .is("deleted_at", null);
+  if (pivotOnly) {
+    seriesQuery.or("legacy_source_type.is.null,legacy_source_type.eq.series");
+  }
+  const { data: hypothesisRows, error: hypothesisError } = await seriesQuery
+    .order("created_at", { ascending: false })
+    .overrideTypes<DbHypothesisRow[]>();
+
+  let mappedFromHyp: GenerationSeriesRecord[] = [];
+  if (!hypothesisError && (hypothesisRows?.length ?? 0) > 0) {
+    const ids = hypothesisRows!.map((row) => row.id);
+    const { data: logs, error: logsError } = await supabaseAdmin
+      .from("vault_logs")
+      .select("id, hypothesis_id, reaction_type, reaction_payload, created_at")
+      .eq("user_id", scopedUserId)
+      .in("hypothesis_id", ids)
+      .order("created_at", { ascending: false })
+      .overrideTypes<DbVaultLogRow[]>();
+    if (logsError) throw logsError;
+
+    const grouped = groupVaultLogsByHypothesis(logs ?? []);
+    mappedFromHyp = hypothesisRows!.map((row) => mapSeriesFromHypothesis(row, grouped.get(row.id) ?? []));
+  } else if (hypothesisError) {
+    throw hypothesisError;
+  }
+
+  const legacyMapped = await loadLegacyGenerationSeriesRecords(scopedUserId);
+  const mergedIds = new Set(mappedFromHyp.map((r) => r.id));
+  const merged = [...mappedFromHyp, ...legacyMapped.filter((r) => !mergedIds.has(r.id))];
+  merged.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return merged;
 }
 
 export async function getArchiveOverview(userId?: string): Promise<ArchiveOverview> {
@@ -1683,6 +1705,7 @@ export async function createGeneration(
     throw error;
   }
 
+  clearArchiveOverviewCache();
   return requireGenerationById(String(data), scopedUserId);
 }
 
@@ -1711,6 +1734,7 @@ export async function createGenerationSeries(
     throw error;
   }
 
+  clearArchiveOverviewCache();
   return requireGenerationSeriesById(String(data), scopedUserId);
 }
 
@@ -1733,21 +1757,27 @@ export async function seedArchiveSampleGenerations(userId?: string): Promise<{ i
   if (singleCountError) throw singleCountError;
   if (seriesCountError) throw seriesCountError;
 
-  if ((singleCount ?? 0) > 0 || (seriesCount ?? 0) > 0) {
-    return { insertedCount: 0 };
+  let insertedCount = 0;
+
+  if ((singleCount ?? 0) === 0) {
+    const rowsToInsert = DEMO_GENERATIONS.map((row) => ({
+      ...row,
+      id: crypto.randomUUID(),
+      user_id: scopedUserId,
+      updated_at: row.created_at,
+    }));
+
+    const { error: insertError } = await supabaseAdmin.from("generations").insert(rowsToInsert);
+
+    if (insertError) {
+      throw insertError;
+    }
+    insertedCount += rowsToInsert.length;
   }
 
-  const rowsToInsert = DEMO_GENERATIONS.map((row) => ({
-    ...row,
-    id: crypto.randomUUID(),
-    user_id: scopedUserId,
-    updated_at: row.created_at,
-  }));
-
-  const { error: insertError } = await supabaseAdmin.from("generations").insert(rowsToInsert);
-
-  if (insertError) {
-    throw insertError;
+  if ((seriesCount ?? 0) > 0) {
+    if (insertedCount > 0) clearArchiveOverviewCache();
+    return { insertedCount };
   }
 
   const seriesRows = DEMO_SERIES.map((row) => ({
@@ -1795,7 +1825,9 @@ export async function seedArchiveSampleGenerations(userId?: string): Promise<{ i
   const { error: seriesItemsError } = await supabaseAdmin.from("generation_series_items").insert(seriesItems);
   if (seriesItemsError) throw seriesItemsError;
 
-  return { insertedCount: rowsToInsert.length + seriesRows.length };
+  insertedCount += seriesRows.length;
+  clearArchiveOverviewCache();
+  return { insertedCount };
 }
 
 async function refreshSeriesAggregate(seriesId: string, userId?: string): Promise<void> {
@@ -1907,6 +1939,7 @@ export async function updateGenerationSeriesItem(
   if (error) throw error;
 
   await refreshSeriesAggregate(currentRow.series_id, scopedUserId);
+  clearArchiveOverviewCache();
   return requireGenerationSeriesById(currentRow.series_id, scopedUserId).then(
     (series) => series.items.find((item) => item.id === id) as GenerationSeriesItemRecord,
   );
