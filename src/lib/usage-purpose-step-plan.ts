@@ -41,6 +41,7 @@ export function buildUsagePurposeStepPlanPromptBlock(usagePurpose: UsagePurposeK
   return [
     "【3ステップの役割（活用方法に連動）】",
     "items は必ず3件。slotKey は順に mon_problem → wed_solution → fri_emotion。",
+    "slotKey は保存順の内部ラベル。body の内容は下の和文の STEP 役割にのみ従い、英語の problem / solution / emotion や「課題」「解決」語感にキー名を合わせて引っ張らないこと。",
     "各 body / immediateAction / validationMetric は、次の役割に沿って一貫させること。",
     `STEP 1（slotKey=mon_problem）: ${r0}`,
     `STEP 2（slotKey=wed_solution）: ${r1}`,

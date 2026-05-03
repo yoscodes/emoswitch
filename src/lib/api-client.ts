@@ -134,6 +134,8 @@ export type GenerateTriplePayload = {
   pain?: string;
   whyMe?: string;
   firstExperiment?: string;
+  /** 種メモ解像度ヒント: なぜ今やるのか（緊急性） */
+  whyNow?: string;
   /** rich: ペルソナ・Identity・成功メモを反映。vanilla: 比較用に汎用トーンへ寄せる */
   identityMode?: "rich" | "vanilla";
 };
@@ -272,6 +274,20 @@ export async function generateTriple(payload: GenerateTriplePayload): Promise<Ge
   return requestJson<GenerateTripleResponse>("/api/generate-triple", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export type OrganizeScrapDraftResponse = {
+  audience: string;
+  pain: string;
+};
+
+/** 下書き（Scrap）を①誰に？②どんな悩み？に仮整理する（生成とは別コール） */
+export async function organizeScrapDraft(draft: string): Promise<OrganizeScrapDraftResponse> {
+  await ensureDemoWorkspace();
+  return requestJson<OrganizeScrapDraftResponse>("/api/scrap-organize", {
+    method: "POST",
+    body: JSON.stringify({ draft: draft.trim() }),
   });
 }
 

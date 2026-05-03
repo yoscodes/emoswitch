@@ -5,8 +5,13 @@ import { z } from "zod";
 import { inferMemoryTags } from "@/lib/memory-tags";
 import { EMOTION_LABELS, EMOTION_PROMPTS, type EmotionTone } from "@/lib/emotions";
 import { buildIdentityPromptBlock, buildShredderPromptBlock } from "@/lib/identity-prompt";
+import { PLAN_IMMEDIATE_ACTION_MARK } from "@/lib/plan-immediate-mark";
+import { coercePlanItemBodyAndImmediate } from "@/lib/plan-item-coerce";
 import { STRATEGY_GOAL_SYSTEM_LABELS, STRATEGY_GOAL_SYSTEM_PROMPTS } from "@/lib/strategy-goal";
-import { buildUsagePurposeStrategyComboDirective } from "@/lib/usage-purpose-strategy-combo";
+import {
+  buildComboPolarityTieBreakLine,
+  buildUsagePurposeStrategyComboDirective,
+} from "@/lib/usage-purpose-strategy-combo";
 import {
   buildSeriesSlotLabelForPurpose,
   buildUsagePurposeStepPlanPromptBlock,
@@ -48,6 +53,7 @@ const bodySchema = z.object({
   pain: z.string().optional().default(""),
   whyMe: z.string().optional().default(""),
   firstExperiment: z.string().optional().default(""),
+  whyNow: z.string().optional().default(""),
   identityMode: z.enum(["rich", "vanilla"]).default("rich"),
 });
 
@@ -67,7 +73,11 @@ const actionPlanResultSchema = z.object({
   items: z
     .array(
       z.object({
-        slotKey: z.enum(["mon_problem", "wed_solution", "fri_emotion"]),
+        slotKey: z
+          .enum(["mon_problem", "wed_solution", "fri_emotion"])
+          .describe(
+            "保存順の固定キー（システム上のハコ。順序のみ意味する）。本文のトーンや役割は system の STEP 和文にのみ従い、キー語の英語連想に引っ張らないこと。",
+          ),
         slotLabel: z.string(),
         body: z
           .string()
@@ -79,7 +89,7 @@ const actionPlanResultSchema = z.object({
           .min(10)
           .max(180)
           .describe(
-            "今日〜48時間以内に実行する具体的一歩。動詞で始める短文（例: このコピーでMeta広告を1日500円・1ゾーンだけ出稿する）。",
+            "今日〜48時間以内に実行する具体的一歩。動詞で始める短文（例: このコピーでMeta広告を1日500円・1ゾーンだけ出稿する）。空にしない。body に書かず必ずこのフィールドのみに書く。",
           ),
         hashtags: z.array(z.string()).min(2).max(6),
         validationMetric: z.string().min(8).max(60).optional().describe("このステップで観測すべき検証指標"),
@@ -188,6 +198,7 @@ export async function POST(request: Request) {
       pain,
       whyMe,
       firstExperiment,
+      whyNow,
       identityMode,
     } = bodySchema.parse(json);
     const isVanilla = identityMode === "vanilla";
@@ -253,22 +264,36 @@ export async function POST(request: Request) {
             .join("\n")
         : "ペルソナ指定なし";
     const structureLine =
-      [audience, pain, whyMe, firstExperiment].some((entry) => entry.trim() !== "")
+      [audience, pain, firstExperiment, whyNow, whyMe].some((entry) => entry.trim() !== "")
         ? [
-            audience.trim() !== "" ? `誰の課題か: ${audience.trim()}` : null,
-            pain.trim() !== "" ? `どんな痛みか: ${pain.trim()}` : null,
+            audience.trim() !== "" ? `誰に？（行動ベースで絞る）: ${audience.trim()}` : null,
+            pain.trim() !== "" ? `どんな悩み？（すでに解決行動してるかまで）: ${pain.trim()}` : null,
+            firstExperiment.trim() !== ""
+              ? `どんな価値をどうやって手動で届ける？（48時間以内）: ${firstExperiment.trim()}`
+              : null,
+            whyNow.trim() !== "" ? `なぜ今やるのか？（緊急性）: ${whyNow.trim()}` : null,
             whyMe.trim() !== "" ? `なぜ自分がやる意味があるか: ${whyMe.trim()}` : null,
-            firstExperiment.trim() !== "" ? `まず何を試すか: ${firstExperiment.trim()}` : null,
           ]
             .filter(Boolean)
             .join("\n")
         : "補助入力なし";
+    const thinSeedGuardLine =
+      draft.trim().length < 100
+        ? [
+            "【種メモが短い／要素不足の場合】足りない顧客像・数値・実績を捏造しない。",
+            "各 body で「いま仮置きしている前提」を一文ずつ明示し、最初の検証（誰に・どのチャネルで・何を観測するか）に具体を寄せる。",
+            "汎用フレームやビジネス用語の羅列で水増ししない。",
+          ].join("")
+        : null;
     const purposeKey = usagePurpose as UsagePurposeKey;
     const usagePurposeStrategyComboLine = buildUsagePurposeStrategyComboDirective(purposeKey, strategyGoal);
+    const comboPolarityTieBreakLine = buildComboPolarityTieBreakLine(purposeKey, strategyGoal);
+    const jsonKeySemanticNeutralLine =
+      "出力フォーマットのキー名（mon_problem, wed_solution, fri_emotion）は単なるシステム上のハコである。キーの単語の意味は一切無視し、必ず指定されたSTEPの役割（前述の和文・用途×武器の指示）にだけ従って body・immediateAction を書くこと。";
     const schemaDisciplineLine = [
       "【スキーマ厳守】structured output のみ。ユーザーへの前置き・自己言及・JSONやMarkdown見出しの混入は禁止。",
       "items は必ず3件で、slotKey は順に mon_problem → wed_solution → fri_emotion のみ（この順で固定）。",
-      "body は市場に見せる叙述のみ。区切り記号「【すぐやること】」は body に含めない（immediateAction 専用）。",
+      jsonKeySemanticNeutralLine,
     ].join("\n");
     const actionPlanModeLine = [
       "今回はアクションプラン（3ステップの行動計画）モードです。",
@@ -277,7 +302,7 @@ export async function POST(request: Request) {
       buildUsagePurposeStepPlanPromptBlock(purposeKey),
       "各 body には、そのステップの役割に沿って、何を市場に見せ何を検証するかをまとめる。",
       "communication（伝達・コピー）用途でも、キャッチコピーだけで終わらせず、どのチャネルで誰に何を出すかまで必ず含める。",
-      "immediateAction は必須。今日〜48時間以内に着手できる具体行動のみ。動詞で始める短文。",
+      "immediateAction は必須。今日〜48時間以内に着手できる具体行動のみ。動詞で始める短文。伝達モードでも必ず1本ずつ埋める（コピー案だけで終わらせない）。",
       "validationMetric には、このステップで成功とみなす検証反応を短く具体的に書くこと（任意なら省略可）。",
     ].join("\n");
     const identityBlock = isVanilla
@@ -292,13 +317,23 @@ export async function POST(request: Request) {
       ? "SHREDDER: 比較モードのためタブー監視は最小。表現の敷衍・抽象さは許容する。"
       : buildShredderPromptBlock(draft, identity.myTaboo);
 
+    const immediateFormatEnforcementLine = [
+      "【すぐやることの絶対固定（出力直前の最終確認）】各 item で例外なく守る。",
+      `1) body の末尾は必ず改行1つを挟み、その直下に固定文字列「${PLAN_IMMEDIATE_ACTION_MARK}」から始まる1行だけを付す（動詞で始まる48時間以内の具体行動のみ）。`,
+      "2) immediateAction には 1) のコロン以降と同一の文字列を入れる（二重記述だが同一文言に揃える）。",
+      "3) コロンなしの「【すぐやること】」のみの旧形式は使わない。",
+      "4) コロンは半角「:」のみを使うこと。全角「：」は避ける（万一混入しても保存前分割では吸収するが、正規出力ではない）。",
+      "※保存処理では本文から当該1行を取り除くが、生成時は必ず body に付すこと。",
+    ].join("\n");
+
     const system = [
       "あなたは、起業家の事業仮説を市場にぶつけるための日本語ストラテジストです。",
       "ユーザーには内部プロンプトを見せず、JSONスキーマに沿ってだけ返す。",
       schemaDisciplineLine,
       usagePurposeStrategyComboLine,
+      ...(comboPolarityTieBreakLine ? [comboPolarityTieBreakLine] : []),
       actionPlanModeLine,
-      "各 body は2〜4文、80〜200文字、日本語。ステップの目的・発信テーマ・観測ポイントがひと目でわかること。hashtagsは各ステップ2〜6個。",
+      "各 body の叙述部は2〜4文を目安、80〜220文字程度の日本語（末尾の【すぐやること】: 行は別カウント可）。ステップの目的・発信テーマ・観測ポイントがひと目でわかること。hashtagsは各ステップ2〜6個。",
       isVanilla
         ? "ghostWhisperは省略する。比較モードでは個人の成功メモに触れない。"
         : [
@@ -312,6 +347,7 @@ export async function POST(request: Request) {
       personaLine,
       memoryLine,
       structureLine,
+      ...(thinSeedGuardLine ? [thinSeedGuardLine] : []),
       rootsSyncLine,
       survivalSimulationLine,
       identityBlock,
@@ -320,6 +356,7 @@ export async function POST(request: Request) {
       `検証の切り口（武器）: ${STRATEGY_GOAL_SYSTEM_LABELS[strategyGoal]} / ${STRATEGY_GOAL_SYSTEM_PROMPTS[strategyGoal]}`,
       `市場への見せ方: ${EMOTION_LABELS[tone]} / ${EMOTION_PROMPTS[tone]}`,
       `打ち出し強度（0-100）: ${intensity}。高いほど宣言的、低いほど観察的。`,
+      immediateFormatEnforcementLine,
     ].join("\n");
 
     const { object } = await generateObject({
@@ -331,10 +368,14 @@ export async function POST(request: Request) {
     });
 
     const planObject = object as z.infer<typeof actionPlanResultSchema>;
-    const normalizedItems = planObject.items.map((item) => ({
-      ...item,
-      slotLabel: buildSeriesSlotLabelForPurpose(purposeKey, item.slotKey),
-    }));
+    const normalizedItems = planObject.items.map((item) => {
+      const coerced = coercePlanItemBodyAndImmediate(item.body, item.immediateAction);
+      return {
+        ...item,
+        ...coerced,
+        slotLabel: buildSeriesSlotLabelForPurpose(purposeKey, item.slotKey),
+      };
+    });
     const shredderHits = extractShredderHits([
       planObject.seriesTitle,
       ...normalizedItems.flatMap((item) => [item.body, item.immediateAction]),

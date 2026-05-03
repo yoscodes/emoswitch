@@ -4,21 +4,35 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, Box, Compass, Filter, Heart, Megaphone, PenLine, Swords, X } from "lucide-react";
+import {
+  BookOpen,
+  Box,
+  Compass,
+  Filter,
+  Heart,
+  Loader2,
+  Megaphone,
+  PenLine,
+  Sparkles,
+  MoveRight,
+  Swords,
+  X,
+} from "lucide-react";
 
 import { GenerationSkeleton } from "@/components/generation-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   analyzeHypothesisCanvas,
-  DATA_SYNC_EVENT,
   ensureDemoWorkspace,
   fetchArchiveInsights,
   fetchCreditSummary,
   fetchGhostSettings,
   fetchUserProfile,
   generateTriple,
+  organizeScrapDraft,
   saveGenerationRecord,
   type GenerateSeriesItem,
   type GenerateSeriesResponse,
@@ -31,17 +45,43 @@ import { EMOTION_LABELS, type EmotionTone } from "@/lib/emotions";
 import { parseEmotionFromQuery, readAndClearReuseSession } from "@/lib/reuse-session";
 import {
   mergeStoredPlanBodyForStorage,
-  readRoadmapDeployContext,
   writeRoadmapDeployContext,
   type RoadmapDeployContextV1,
 } from "@/lib/roadmap-deploy";
 import { SERIES_SLOT_CONFIG } from "@/lib/series";
 import { getUsagePurposeStepRoleLines, type UsagePurposeKey } from "@/lib/usage-purpose-step-plan";
+import { getStructuredSheetHints, STRUCTURED_SHEET_LABELS } from "@/lib/structured-sheet-hints";
 import { playSwitchClick } from "@/lib/switch-sound";
 import { cn } from "@/lib/utils";
 
 const CANVAS_PLACEHOLDER =
-  "整理せず、そのままの言葉で教えてください";
+  "整理せず、そのままの言葉で。あとから下のヒントで解像度を上げられます";
+
+/** 下書きがこの文字数以上で「下書きを整理する」を表示 */
+const SCRAP_AUTOFILL_MIN_CHARS = 100;
+
+function SeedPowerGapCue({ active }: { active: boolean }) {
+  if (!active) return null;
+  return (
+    <div
+      className="flex items-start gap-2 rounded-lg border border-violet-300/45 bg-violet-500/6 px-2.5 py-2 dark:border-violet-500/35 dark:bg-violet-950/30"
+      role="status"
+    >
+      <span
+        className="flex size-6 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[11px] font-bold leading-none text-white shadow-sm dark:bg-violet-500"
+        aria-hidden
+      >
+        !
+      </span>
+      <div className="min-w-0 space-y-0.5">
+        <p className="text-[11px] font-medium leading-snug text-foreground">ここがまだ抜けています</p>
+        <p className="text-[10px] leading-snug text-muted-foreground">
+          埋めると作戦の解像度が上がります（任意・パワーアップ枠）
+        </p>
+      </div>
+    </div>
+  );
+}
 
 /** Identity OFF 時に見せる「Vanilla」一般論のイメージ（同一 SEED の再生成ではない比較用コピー） */
 const VANILLA_COMPARISON_ACTION_PLAN: readonly string[] = [
@@ -99,6 +139,13 @@ const STRATEGY_TEMPLATES: Array<{
     strategyGoal: "logic",
   },
 ];
+
+/** 武器選択時に Protocol で見せる 3STEP の短い見出し（PHASE 由来の役割行と併用） */
+const WEAPON_PROTOCOL_STEP_LABELS: Record<StrategyTemplateId, readonly [string, string, string]> = {
+  validation: ["共鳴の仮説を一言に", "小さな打ち手で反応を見る", "次の声掛けに反映"],
+  "pain-signal": ["痛みの芯を言語化", "違和のシグナルを取る", "刺さりの改善を一歩"],
+  "authority-proof": ["論点と根拠の並べ方", "納得の階段を積む", "次の説得アクション"],
+};
 
 const USAGE_PURPOSE_TILES: Array<{
   id: UsagePurpose;
@@ -350,15 +397,19 @@ function buildOpportunitySeed(params: {
   draft: string;
   audience: string;
   pain: string;
-  whyMe: string;
   firstExperiment: string;
+  whyNow: string;
+  whyMe: string;
 }) {
   const sections = [
-    params.draft.trim() ? `事業の種:\n${params.draft.trim()}` : null,
-    params.audience.trim() ? `誰の課題か:\n${params.audience.trim()}` : null,
-    params.pain.trim() ? `どんな痛みか:\n${params.pain.trim()}` : null,
+    params.draft.trim() ? `下書き（Scrap）:\n${params.draft.trim()}` : null,
+    params.audience.trim() ? `誰に？（行動ベースで絞る）:\n${params.audience.trim()}` : null,
+    params.pain.trim() ? `どんな悩み？（すでに解決行動してるかまで）:\n${params.pain.trim()}` : null,
+    params.firstExperiment.trim()
+      ? `どんな価値をどうやって手動で届ける？（48時間以内）:\n${params.firstExperiment.trim()}`
+      : null,
+    params.whyNow.trim() ? `なぜ今やるのか？（緊急性）:\n${params.whyNow.trim()}` : null,
     params.whyMe.trim() ? `AIへの追加回答:\n${params.whyMe.trim()}` : null,
-    params.firstExperiment.trim() ? `まず何を試すか:\n${params.firstExperiment.trim()}` : null,
   ].filter(Boolean);
 
   return sections.join("\n\n");
@@ -366,11 +417,31 @@ function buildOpportunitySeed(params: {
 
 type SeriesResult = GenerateSeriesResponse;
 
+/** 種の入れ方: 自由メモと構造化シートは同時に使わない（storedSeed は選択中のみ反映） */
+type SeedInputMode = "free" | "structured";
+
+const LAB_SEED_STORAGE_KEY = "emoswitch_lab_seed_v1";
+
+type LabSeedPersistV1 = {
+  v: 1;
+  draft: string;
+  seedAudience: string;
+  seedPain: string;
+  seedFirstExperiment: string;
+  seedWhyNow: string;
+  refinementAnswer: string;
+  seedInputMode: SeedInputMode;
+};
+
 export function MainLabWorkspace() {
   const router = useRouter();
   const hasAppliedInitialOverridesRef = useRef(false);
   const prevHasLiveOutputRef = useRef(false);
   const [draft, setDraft] = useState("");
+  const [seedAudience, setSeedAudience] = useState("");
+  const [seedPain, setSeedPain] = useState("");
+  const [seedFirstExperiment, setSeedFirstExperiment] = useState("");
+  const [seedWhyNow, setSeedWhyNow] = useState("");
   const [refinementAnswer, setRefinementAnswer] = useState("");
   const [strategyGoal, setStrategyGoal] = useState<StrategyGoal>("empathy");
   const [emotion, setEmotion] = useState<EmotionTone>("empathy");
@@ -398,32 +469,101 @@ export function MainLabWorkspace() {
   const [identityFilterOn, setIdentityFilterOn] = useState(true);
   const [lastGenerationIdentityMode, setLastGenerationIdentityMode] = useState<"rich" | "vanilla">("rich");
   const [lastSavedSeries, setLastSavedSeries] = useState<GenerationSeriesRecord | null>(null);
-  const [roadmapDeploySnap, setRoadmapDeploySnap] = useState<{ seriesId: string; planTitle: string } | null>(null);
+  const [scrapOrganizing, setScrapOrganizing] = useState(false);
+  const [seedInputMode, setSeedInputMode] = useState<SeedInputMode>("free");
+  const [scrapDistilled, setScrapDistilled] = useState(false);
+  const [aiSheetProvisional, setAiSheetProvisional] = useState<{ audience: boolean; pain: boolean }>({
+    audience: false,
+    pain: false,
+  });
+  const distilledSnapshotRef = useRef<string | null>(null);
 
   const energyGlow = ENERGY_RGB_BY_EMOTION[emotion];
   const currentGoalLabel = STRATEGY_GOAL_UI_LABELS[strategyGoal];
   const trimmedDraft = draft.trim();
-  const storedSeed = useMemo(
-    () =>
-      buildOpportunitySeed({
+  const structuredFilledCount = useMemo(
+    () => [seedAudience, seedPain, seedFirstExperiment, seedWhyNow].filter((s) => s.trim()).length,
+    [seedAudience, seedPain, seedFirstExperiment, seedWhyNow],
+  );
+  const storedSeed = useMemo(() => {
+    if (seedInputMode === "free") {
+      return buildOpportunitySeed({
         draft,
         audience: "",
         pain: "",
-        whyMe: refinementAnswer,
         firstExperiment: "",
-      }),
-    [draft, refinementAnswer],
+        whyNow: "",
+        whyMe: refinementAnswer,
+      });
+    }
+    return buildOpportunitySeed({
+      draft: "",
+      audience: seedAudience,
+      pain: seedPain,
+      firstExperiment: seedFirstExperiment,
+      whyNow: seedWhyNow,
+      whyMe: refinementAnswer,
+    });
+  }, [
+    seedInputMode,
+    draft,
+    refinementAnswer,
+    seedAudience,
+    seedPain,
+    seedFirstExperiment,
+    seedWhyNow,
+  ]);
+  const inputCompletionCount =
+    seedInputMode === "free"
+      ? [draft, refinementAnswer].filter((item) => item.trim()).length
+      : structuredFilledCount;
+  const inputCompletionTotal = seedInputMode === "free" ? 2 : 4;
+  const seedReadinessPercent = Math.min(
+    100,
+    Math.round((inputCompletionCount / inputCompletionTotal) * 100),
   );
-  const inputCompletionCount = [draft, refinementAnswer].filter((item) => item.trim()).length;
   const strategyMatrixTiles = STRATEGY_TEMPLATES;
   const activeTemplate = STRATEGY_TEMPLATES.find((template) => template.id === activeTemplateId) ?? null;
-  const canChooseSprint = trimmedDraft.length > 0;
+  const showScrapOrganizeButton =
+    seedInputMode === "free" && trimmedDraft.length >= SCRAP_AUTOFILL_MIN_CHARS;
+
+  const handleOrganizeScrap = useCallback(async () => {
+    if (trimmedDraft.length < SCRAP_AUTOFILL_MIN_CHARS) return;
+    setScrapOrganizing(true);
+    setError(null);
+    try {
+      await ensureDemoWorkspace();
+      const out = await organizeScrapDraft(trimmedDraft);
+      distilledSnapshotRef.current = trimmedDraft;
+      setSeedAudience(out.audience);
+      setSeedPain(out.pain);
+      setAiSheetProvisional({ audience: true, pain: true });
+      setScrapDistilled(true);
+      setSeedInputMode("structured");
+      playSwitchClick();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "蒸留に失敗しました");
+    } finally {
+      setScrapOrganizing(false);
+    }
+  }, [trimmedDraft]);
   const vaultReactionSlots = PURPOSE_VAULT_SLOTS[usagePurposeId];
   const stepActionPreview = useMemo(
     () => [...getUsagePurposeStepRoleLines(usagePurposeId as UsagePurposeKey)],
     [usagePurposeId],
   );
+  const protocolStepRows = useMemo(() => {
+    if (activeTemplateId) {
+      const labels = WEAPON_PROTOCOL_STEP_LABELS[activeTemplateId];
+      return labels.map((primary, index) => ({
+        primary,
+        sub: stepActionPreview[index] ?? "",
+      }));
+    }
+    return stepActionPreview.map((role) => ({ primary: role, sub: "" as string }));
+  }, [activeTemplateId, stepActionPreview]);
   const activePurpose = USAGE_PURPOSE_TILES.find((tile) => tile.id === usagePurposeId) ?? USAGE_PURPOSE_TILES[0];
+  const structuredSheetHints = useMemo(() => getStructuredSheetHints(usagePurposeId), [usagePurposeId]);
   const activeProtocol = PURPOSE_PROTOCOL[usagePurposeId];
   const purposeSurface = PURPOSE_SURFACE[usagePurposeId];
   const seriesRoadmap = useMemo(
@@ -445,6 +585,11 @@ export function MainLabWorkspace() {
     else if (personaStatus === "draft") p = Math.max(p, 52);
     return Math.min(100, p);
   }, [manualPosts, personaKeywords, personaStatus, personaSummary]);
+  /** SEED 列のゲージ: Identity DNA と、現在タブの入力埋まりを半々で合成（タブで数値が変わる） */
+  const dnaLabGaugePercent = Math.min(
+    100,
+    Math.round((identityExtractionPercent + seedReadinessPercent) / 2),
+  );
   const sprintTimelinePhases = useMemo(
     () =>
       seriesRoadmap.map((phase, index) => {
@@ -510,6 +655,7 @@ export function MainLabWorkspace() {
     const fromSession = readAndClearReuseSession();
     if (fromSession) {
       hasAppliedInitialOverridesRef.current = true;
+      setSeedInputMode("free");
       setDraft(fromSession.draft);
       applyTonePreset(fromSession.emotion, fromSession.intensity);
       setStrategyGoal(inferGoalFromEmotion(fromSession.emotion));
@@ -536,6 +682,7 @@ export function MainLabWorkspace() {
     }
     if (qDraft != null && qDraft !== "") {
       try {
+        setSeedInputMode("free");
         setDraft(decodeURIComponent(qDraft));
         changed = true;
       } catch {
@@ -556,6 +703,54 @@ export function MainLabWorkspace() {
       })
       .catch(() => undefined);
   }, [applyTonePreset, router]);
+
+  useEffect(() => {
+    if (!scrapDistilled || distilledSnapshotRef.current == null) return;
+    if (draft.trim() !== distilledSnapshotRef.current) setScrapDistilled(false);
+  }, [draft, scrapDistilled]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      if (hasAppliedInitialOverridesRef.current) return;
+      try {
+        const raw = localStorage.getItem(LAB_SEED_STORAGE_KEY);
+        if (!raw) return;
+        const p = JSON.parse(raw) as LabSeedPersistV1;
+        if (p.v !== 1) return;
+        if (typeof p.draft === "string") setDraft(p.draft);
+        if (typeof p.seedAudience === "string") setSeedAudience(p.seedAudience);
+        if (typeof p.seedPain === "string") setSeedPain(p.seedPain);
+        if (typeof p.seedFirstExperiment === "string") setSeedFirstExperiment(p.seedFirstExperiment);
+        if (typeof p.seedWhyNow === "string") setSeedWhyNow(p.seedWhyNow);
+        if (typeof p.refinementAnswer === "string") setRefinementAnswer(p.refinementAnswer);
+        if (p.seedInputMode === "structured" || p.seedInputMode === "free") setSeedInputMode(p.seedInputMode);
+      } catch {
+        /* ignore */
+      }
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      try {
+        const blob: LabSeedPersistV1 = {
+          v: 1,
+          draft,
+          seedAudience,
+          seedPain,
+          seedFirstExperiment,
+          seedWhyNow,
+          refinementAnswer,
+          seedInputMode,
+        };
+        localStorage.setItem(LAB_SEED_STORAGE_KEY, JSON.stringify(blob));
+      } catch {
+        /* ignore */
+      }
+    }, 550);
+    return () => window.clearTimeout(t);
+  }, [draft, seedAudience, seedPain, seedFirstExperiment, seedWhyNow, refinementAnswer, seedInputMode]);
 
   useEffect(() => {
     let active = true;
@@ -635,6 +830,8 @@ export function MainLabWorkspace() {
     personaSummary,
     refinementAnswer,
     storedSeed,
+    seedInputMode,
+    seedReadinessPercent,
     usagePurposeId,
   ]);
 
@@ -648,6 +845,7 @@ export function MainLabWorkspace() {
       if (!response.ok) throw new Error(data.error ?? "文字起こしエラー");
       const transcriptText = data.text ?? "";
       if (transcriptText) {
+        setSeedInputMode("free");
         setDraft((prev) => (prev ? `${prev}\n${transcriptText}` : transcriptText));
       }
     } finally {
@@ -682,6 +880,10 @@ export function MainLabWorkspace() {
 
       const data = await generateTriple({
         draft: storedSeed,
+        audience: seedInputMode === "structured" ? seedAudience.trim() : "",
+        pain: seedInputMode === "structured" ? seedPain.trim() : "",
+        firstExperiment: seedInputMode === "structured" ? seedFirstExperiment.trim() : "",
+        whyNow: seedInputMode === "structured" ? seedWhyNow.trim() : "",
         strategyGoal,
         usagePurpose: usagePurposeId,
         emotion,
@@ -751,6 +953,11 @@ export function MainLabWorkspace() {
     activeTemplate,
     refinementAnswer,
     storedSeed,
+    seedAudience,
+    seedPain,
+    seedFirstExperiment,
+    seedWhyNow,
+    seedInputMode,
     strategyGoal,
     usagePurposeId,
     identityFilterOn,
@@ -788,27 +995,38 @@ export function MainLabWorkspace() {
     "shrink-0 border-b border-border/20 bg-linear-to-r px-4 py-3 transition-[background-image] duration-500 ease-out";
   const columnBodyClass =
     "min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]";
-  const outputBodyClass =
-    "flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]";
   const laneDividerClass = "border-t border-border/15 pt-4";
   const hasLiveOutput = seriesItems.length === 3;
   const alignmentPercent =
     dnaAlignment == null ? null : Math.min(100, Math.max(0, Math.round(dnaAlignment)));
   const canDeploy = Boolean(storedSeed.trim()) && !uploading && !loading && activeTemplate != null;
 
+  const deployGateHints = useMemo(() => {
+    const hints: string[] = [];
+    if (!storedSeed.trim()) hints.push("SEED（中央）に種を入れる");
+    if (activeTemplate == null) hints.push("WEAPON（上の3枚）を選ぶ");
+    if (uploading) hints.push("音声の取り込みが終わるまで待つ");
+    return hints;
+  }, [storedSeed, activeTemplate, uploading]);
+
   const seedReportFragment = useMemo(() => {
-    const raw = draft.trim() || storedSeed.replace(/\n+/g, " ").trim();
+    const raw =
+      seedInputMode === "free"
+        ? draft.trim() || storedSeed.replace(/\n+/g, " ").trim()
+        : storedSeed.replace(/\n+/g, " ").trim();
     const flat = raw.replace(/\s+/g, " ").trim();
     if (!flat) return "";
     return flat.length > 140 ? `${flat.slice(0, 140)}…` : flat;
-  }, [draft, storedSeed]);
+  }, [draft, storedSeed, seedInputMode]);
 
   const identityResonancePercent = useMemo(() => {
     if (alignmentPercent != null) {
-      return Math.round(Math.min(100, Math.max(0, (alignmentPercent + identityExtractionPercent) / 2)));
+      return Math.round(
+        Math.min(100, Math.max(0, (alignmentPercent + identityExtractionPercent + seedReadinessPercent) / 3)),
+      );
     }
-    return identityExtractionPercent;
-  }, [alignmentPercent, identityExtractionPercent]);
+    return Math.round(Math.min(100, Math.max(0, (identityExtractionPercent + seedReadinessPercent) / 2)));
+  }, [alignmentPercent, identityExtractionPercent, seedReadinessPercent]);
 
   const handleDeployToRoadmap = useCallback(() => {
     if (!lastSavedSeries) return;
@@ -831,7 +1049,6 @@ export function MainLabWorkspace() {
       deployedAt: new Date().toISOString(),
     };
     writeRoadmapDeployContext(payload);
-    setRoadmapDeploySnap({ seriesId: lastSavedSeries.id, planTitle: lastSavedSeries.title });
     setResultsModalOpen(false);
     router.push(`/roadmap?series=${lastSavedSeries.id}`);
   }, [
@@ -870,16 +1087,6 @@ export function MainLabWorkspace() {
     };
   }, [resultsModalOpen]);
 
-  useEffect(() => {
-    const syncRoadmapSnap = () => {
-      const ctx = readRoadmapDeployContext();
-      setRoadmapDeploySnap(ctx ? { seriesId: ctx.seriesId, planTitle: ctx.planTitle } : null);
-    };
-    syncRoadmapSnap();
-    window.addEventListener(DATA_SYNC_EVENT, syncRoadmapSnap);
-    return () => window.removeEventListener(DATA_SYNC_EVENT, syncRoadmapSnap);
-  }, []);
-
   return (
     <div className="relative min-h-[calc(100vh-4rem)] overflow-hidden bg-zinc-50 transition-colors duration-500 ease-out dark:bg-background">
       <div className="pointer-events-none absolute inset-0">
@@ -906,7 +1113,94 @@ export function MainLabWorkspace() {
       <div className="relative mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 pb-4 pt-5 md:px-6 md:pt-8 xl:px-8 2xl:px-10 lg:h-[calc(100vh-4rem)]">
         <div className="flex flex-1 min-h-0 flex-col gap-4">
           <div className="grid flex-1 min-h-0 gap-5 lg:h-full lg:grid-cols-[minmax(280px,1fr)_minmax(440px,1.65fr)_minmax(320px,1.2fr)] lg:items-start xl:gap-6 xl:grid-cols-[minmax(300px,1fr)_minmax(520px,1.65fr)_minmax(340px,1.2fr)] 2xl:grid-cols-[minmax(320px,1fr)_minmax(580px,1.65fr)_minmax(360px,1.2fr)]">
-              <section className={cn(columnCardClass, purposeSurface.cardBorder)}>
+              <section
+                className={cn(
+                  columnCardClass,
+                  purposeSurface.cardBorder,
+                  "relative flex min-h-0 flex-col overflow-hidden lg:overflow-visible",
+                )}
+              >
+                <div
+                  className="pointer-events-none absolute -right-2 top-[4.5rem] bottom-24 z-10 hidden w-5 lg:block"
+                  aria-hidden
+                >
+                  <div className="flex h-full flex-col items-center gap-1 pt-2">
+                    <div
+                      className="w-px flex-1 max-h-40 bg-gradient-to-b from-transparent via-violet-400/55 to-transparent dark:via-violet-500/45"
+                      style={{
+                        opacity: 0.35 + (usagePurposeId ? 0.45 : 0),
+                        boxShadow: usagePurposeId ? "0 0 12px 1px rgba(124,58,237,0.25)" : undefined,
+                      }}
+                    />
+                    <MoveRight className="size-4 shrink-0 text-violet-500/70 dark:text-violet-400/80" />
+                  </div>
+                </div>
+                <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-2.5">
+                      <span className="text-xl leading-none" aria-hidden>
+                        ◎
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold tracking-tight text-foreground">PHASE</p>
+                        <p className="text-xs text-muted-foreground">作戦の目的（活用方法）</p>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="rounded-full text-[10px]">
+                      {activePurpose.phase}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className={cn(columnBodyClass, "flex flex-1 flex-col gap-3 overflow-y-auto pb-4")}>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    思考の出発点。選ぶと中央の SEED（解像度シート）のヒントが即座に切り替わります。
+                  </p>
+                  <div className="flex flex-col gap-2.5">
+                    {USAGE_PURPOSE_TILES.map((tile) => {
+                      const active = tile.id === usagePurposeId;
+                      const meta = USAGE_PURPOSE_TILE_META[tile.id];
+                      return (
+                        <button
+                          key={tile.id}
+                          type="button"
+                          onClick={() => applyUsagePurpose(tile.id)}
+                          className={cn(
+                            "w-full rounded-2xl border border-border/25 bg-muted/20 px-3.5 py-3 text-left transition-all hover:bg-muted/40",
+                            active &&
+                              "relative border-violet-400/55 bg-background shadow-[10px_0_32px_-14px_rgba(124,58,237,0.5)] ring-2 ring-violet-500/45 ring-offset-1 ring-offset-zinc-50 dark:border-violet-500/40 dark:bg-violet-950/25 dark:shadow-[14px_0_40px_-12px_rgba(139,92,246,0.38)] dark:ring-offset-background",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-background/85 text-muted-foreground">
+                              {meta.icon}
+                            </span>
+                            <span className="text-right text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground/85">
+                              {tile.phase}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-sm font-semibold leading-tight">{tile.label}</p>
+                          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{tile.summary}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+
+              <section className={cn(columnCardClass, purposeSurface.cardBorder, "relative")}>
+                <div
+                  className="pointer-events-none absolute -left-1 top-[4.5rem] bottom-32 z-10 hidden w-4 lg:block"
+                  aria-hidden
+                >
+                  <div
+                    className="h-full w-full bg-gradient-to-r from-violet-500/15 via-transparent to-transparent opacity-90 dark:from-violet-400/12"
+                    style={{
+                      opacity: 0.12 + dnaLabGaugePercent * 0.006,
+                      transform: "translateX(2px)",
+                    }}
+                  />
+                </div>
                 <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-2.5">
@@ -915,13 +1209,13 @@ export function MainLabWorkspace() {
                       </span>
                       <div>
                         <p className="text-sm font-semibold tracking-tight text-foreground">SEED</p>
-                        <p className="text-xs text-muted-foreground">種（入力）</p>
+                        <p className="text-xs text-muted-foreground">作戦の種（自由メモ or 構造化シート）</p>
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <div
                         className="flex flex-col items-end gap-1"
-                        title="キーワード・要約・DNA 選択などの入力から推定した整理度（Identity Lab と連動）"
+                        title={`DNA（Identity）推定 ${identityExtractionPercent}% と、いまのタブの入力埋まり ${seedReadinessPercent}% を半々に合成。右の生成へ向けた充填度です。`}
                       >
                         <p className="text-[10px] font-semibold tracking-wide text-muted-foreground">DNA 整理度</p>
                         <div
@@ -930,31 +1224,252 @@ export function MainLabWorkspace() {
                             identitySyncCue && "shadow-[0_0_28px_-8px_rgba(139,92,246,0.85)]",
                           )}
                           style={{
-                            background: `conic-gradient(rgba(124,58,237,0.92) 0% ${identityExtractionPercent}%, rgba(228,228,231,0.42) ${identityExtractionPercent}% 100%)`,
+                            background: `conic-gradient(rgba(124,58,237,0.92) 0% ${dnaLabGaugePercent}%, rgba(228,228,231,0.42) ${dnaLabGaugePercent}% 100%)`,
+                            boxShadow:
+                              dnaLabGaugePercent > 0
+                                ? `0 0 ${12 + Math.round(dnaLabGaugePercent * 0.22)}px -2px rgba(124,58,237,0.35)`
+                                : undefined,
                           }}
                         >
                           <div className="grid size-[2.15rem] place-items-center rounded-full bg-background/95 text-center">
                             <p className="text-[11px] font-semibold tabular-nums leading-none text-foreground">
-                              {identityExtractionPercent}
+                              {dnaLabGaugePercent}
                               <span className="text-[9px] font-semibold">%</span>
                             </p>
                           </div>
                         </div>
                       </div>
                       <Badge variant="secondary" className="rounded-full text-[10px]">
-                        入力 {inputCompletionCount}/2
+                        {seedInputMode === "free" ? "自由" : "シート"} {inputCompletionCount}/{inputCompletionTotal}
                       </Badge>
                     </div>
                   </div>
                 </div>
 
                 <div className={cn(columnBodyClass, "pb-24")}>
-                <Textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder={CANVAS_PLACEHOLDER}
-                  className="min-h-[240px] resize-y rounded-2xl border-0 bg-muted/20 text-base leading-7 shadow-none placeholder:text-muted-foreground/45"
-                />
+                <Tabs
+                  value={seedInputMode}
+                  onValueChange={(next) => {
+                    setSeedInputMode(next as SeedInputMode);
+                    playSwitchClick();
+                  }}
+                  className="flex w-full flex-col gap-3"
+                >
+                  <TabsList className="grid h-auto min-h-10 w-full grid-cols-2 gap-1 rounded-xl bg-muted/80 p-1">
+                    <TabsTrigger
+                      value="free"
+                      title="言語化が得意な人向け"
+                      className="flex min-h-13 flex-1 flex-col justify-center gap-0.5 py-2 text-center text-xs leading-tight sm:text-sm"
+                    >
+                      <span className="font-semibold">自由な種メモ</span>
+                      <span className="hidden font-normal text-muted-foreground sm:block sm:text-[10px]">
+                        広い入力欄
+                      </span>
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="structured"
+                      title="何を書けばいいか迷う人向け"
+                      className="flex min-h-13 flex-1 flex-col justify-center gap-0.5 py-2 text-center text-xs leading-tight sm:text-sm"
+                    >
+                      <span className="font-semibold">構造化シート</span>
+                      <span className="hidden font-normal text-muted-foreground sm:block sm:text-[10px]">
+                        ①〜④で整理
+                      </span>
+                    </TabsTrigger>
+                  </TabsList>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    タブで排他選択。生成に乗るのは選んだ側だけ。もう一方はブラウザに残るので迷いを安心して試せます（シート側では自由メモを参照用に表示します）。
+                  </p>
+
+                  <TabsContent value="free" className="mt-0 flex flex-col gap-4 outline-none">
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="text-xs font-semibold tracking-tight text-foreground">下書き（Scrap）</p>
+                        {trimmedDraft.length > 0 ? (
+                          <span className="text-[10px] tabular-nums text-muted-foreground">
+                            {trimmedDraft.length} 文字
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                        思いついたまま書く向け。100文字を超えると、AIで思考を蒸留してシートの①②へ仮整理できます（転記ではなく要約・分解）。
+                      </p>
+                    </div>
+                    <Textarea
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      placeholder={CANVAS_PLACEHOLDER}
+                      className="min-h-[240px] resize-y rounded-2xl border-0 bg-muted/20 text-base leading-7 shadow-none placeholder:text-muted-foreground/45"
+                      aria-label="下書き（Scrap）"
+                    />
+                    {showScrapOrganizeButton ? (
+                      <div className="flex flex-col gap-2 rounded-xl border border-dashed border-violet-300/50 bg-violet-500/4 px-3 py-2.5 dark:border-violet-500/35 dark:bg-violet-950/20 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-[11px] leading-snug text-muted-foreground">
+                          AI が下書きを蒸留し、①②へ仮置きします。嘘っぽい行は自分の言葉で直す前提です（未確定は琥珀色で表示）。
+                        </p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={scrapOrganizing}
+                          onClick={() => void handleOrganizeScrap()}
+                          className="h-8 shrink-0 gap-1.5 rounded-full px-3 text-xs font-medium"
+                        >
+                          {scrapOrganizing ? (
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                          ) : (
+                            <Sparkles className="size-3.5 text-violet-600 dark:text-violet-300" aria-hidden />
+                          )}
+                          蒸留してシートへ
+                        </Button>
+                      </div>
+                    ) : null}
+                  </TabsContent>
+
+                  <TabsContent value="structured" className="mt-0 flex flex-col gap-3 outline-none">
+                    <div className="rounded-2xl border border-border/40 bg-muted/15 px-3 py-2.5">
+                      <p className="text-xs font-semibold text-foreground">
+                        解像度シート（{activePurpose.label}）
+                      </p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                        {structuredSheetHints.sheetIntro}
+                        ①〜④は好きな組み合わせで。1つだけでも埋まれば進められます。空欄は「！」で見える化します。
+                      </p>
+                    </div>
+                    {draft.trim().length > 0 ? (
+                      <div className="rounded-2xl border border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[11px] font-semibold text-muted-foreground">自由メモ（参照用）</p>
+                          {scrapDistilled ? (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-300/60 bg-amber-50/90 text-[9px] text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-50"
+                            >
+                              自由メモから蒸留済み
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+                          生成に使うのはこのシートだけ。下書きの熱量は消えておらず、必要なら自由タブへ戻れます。
+                        </p>
+                        <p className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground/75">
+                          {draft.trim()}
+                        </p>
+                      </div>
+                    ) : null}
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label htmlFor="lab-seed-audience" className="text-xs font-semibold text-foreground">
+                          {STRUCTURED_SHEET_LABELS.audienceLabel}
+                        </label>
+                        {aiSheetProvisional.audience ? (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-950 dark:bg-amber-900/55 dark:text-amber-50">
+                            AI仮置き（未確定）
+                          </span>
+                        ) : null}
+                      </div>
+                      {structuredSheetHints.audienceSubline ? (
+                        <p className="text-[10px] leading-snug text-muted-foreground/85">{structuredSheetHints.audienceSubline}</p>
+                      ) : null}
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        {structuredSheetHints.audience.hint}
+                      </p>
+                      <p className="text-[10px] leading-snug text-muted-foreground/90">
+                        例：{structuredSheetHints.audience.example}
+                      </p>
+                      <SeedPowerGapCue active={seedInputMode === "structured" && !seedAudience.trim()} />
+                      <Textarea
+                        id="lab-seed-audience"
+                        value={seedAudience}
+                        onChange={(e) => {
+                          setAiSheetProvisional((prev) => ({ ...prev, audience: false }));
+                          setSeedAudience(e.target.value);
+                        }}
+                        placeholder={structuredSheetHints.audience.placeholder}
+                        rows={2}
+                        className={cn(
+                          "min-h-0 resize-y rounded-xl border-0 bg-background/80 text-sm leading-relaxed shadow-none placeholder:text-muted-foreground/45",
+                          aiSheetProvisional.audience &&
+                            "ring-2 ring-amber-400/45 bg-amber-50/55 dark:bg-amber-950/35 dark:ring-amber-500/45",
+                        )}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label htmlFor="lab-seed-pain" className="text-xs font-semibold text-foreground">
+                          {STRUCTURED_SHEET_LABELS.painLabel}
+                        </label>
+                        {aiSheetProvisional.pain ? (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-950 dark:bg-amber-900/55 dark:text-amber-50">
+                            AI仮置き（未確定）
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        {structuredSheetHints.pain.hint}
+                      </p>
+                      <p className="text-[10px] leading-snug text-muted-foreground/90">
+                        例：{structuredSheetHints.pain.example}
+                      </p>
+                      <SeedPowerGapCue active={seedInputMode === "structured" && !seedPain.trim()} />
+                      <Textarea
+                        id="lab-seed-pain"
+                        value={seedPain}
+                        onChange={(e) => {
+                          setAiSheetProvisional((prev) => ({ ...prev, pain: false }));
+                          setSeedPain(e.target.value);
+                        }}
+                        placeholder={structuredSheetHints.pain.placeholder}
+                        rows={2}
+                        className={cn(
+                          "min-h-0 resize-y rounded-xl border-0 bg-background/80 text-sm leading-relaxed shadow-none placeholder:text-muted-foreground/45",
+                          aiSheetProvisional.pain &&
+                            "ring-2 ring-amber-400/45 bg-amber-50/55 dark:bg-amber-950/35 dark:ring-amber-500/45",
+                        )}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="lab-seed-experiment" className="text-xs font-semibold text-foreground">
+                        {STRUCTURED_SHEET_LABELS.experimentLabel}
+                      </label>
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        {structuredSheetHints.firstExperiment.hint}
+                      </p>
+                      <p className="text-[10px] leading-snug text-muted-foreground/90">
+                        例：{structuredSheetHints.firstExperiment.example}
+                      </p>
+                      <SeedPowerGapCue active={seedInputMode === "structured" && !seedFirstExperiment.trim()} />
+                      <Textarea
+                        id="lab-seed-experiment"
+                        value={seedFirstExperiment}
+                        onChange={(e) => setSeedFirstExperiment(e.target.value)}
+                        placeholder={structuredSheetHints.firstExperiment.placeholder}
+                        rows={2}
+                        className="min-h-0 resize-y rounded-xl border-0 bg-background/80 text-sm leading-relaxed shadow-none placeholder:text-muted-foreground/45"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="lab-seed-whynow" className="text-xs font-semibold text-foreground">
+                        {STRUCTURED_SHEET_LABELS.whyNowLabel}
+                      </label>
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        {structuredSheetHints.whyNow.hint}
+                      </p>
+                      <p className="text-[10px] leading-snug text-muted-foreground/90">
+                        例：{structuredSheetHints.whyNow.example}
+                      </p>
+                      <SeedPowerGapCue active={seedInputMode === "structured" && !seedWhyNow.trim()} />
+                      <Textarea
+                        id="lab-seed-whynow"
+                        value={seedWhyNow}
+                        onChange={(e) => setSeedWhyNow(e.target.value)}
+                        placeholder={structuredSheetHints.whyNow.placeholder}
+                        rows={2}
+                        className="min-h-0 resize-y rounded-xl border-0 bg-background/80 text-sm leading-relaxed shadow-none placeholder:text-muted-foreground/45"
+                      />
+                    </div>
+                  </TabsContent>
+                </Tabs>
 
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border bg-background/90 px-4 py-3 text-sm shadow-sm transition-colors hover:bg-background">
                   <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">話して入力</span>
@@ -973,433 +1488,314 @@ export function MainLabWorkspace() {
                 </div>
               </section>
 
-              <section className={cn(columnCardClass, purposeSurface.cardBorder, "flex min-h-0 flex-col")}>
-                <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold tracking-tight text-foreground">STRATEGY</p>
-                      <p className="text-xs text-muted-foreground">目的 → 武器（戦略）→ アクションプラン</p>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+              <section
+                className={cn(
+                  columnCardClass,
+                  purposeSurface.cardBorder,
+                  "flex min-h-0 flex-col max-lg:overflow-visible",
+                )}
+              >
+                <div className={cn(columnHeaderBase, purposeSurface.headerWash, "py-2.5")}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold tracking-tight text-foreground">WEAPON & DEPLOY</p>
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                       {loading ? (
-                        <Badge className="animate-pulse rounded-full bg-violet-600 px-2.5 py-0.5 text-[10px] text-white">検証中</Badge>
+                        <Badge className="animate-pulse rounded-full bg-violet-600 px-2 py-0.5 text-[10px] text-white">検証中</Badge>
                       ) : null}
-                      <Badge variant="outline" className="rounded-full border-amber-200/60 bg-amber-50/80 text-[10px] text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-100">
+                      <Badge variant="outline" className="max-w-[7rem] truncate rounded-full border-amber-200/60 bg-amber-50/80 text-[10px] text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-100">
                         {activePurpose.label}
                       </Badge>
+                      <span className="text-[11px] font-medium text-muted-foreground/80">×</span>
                       {activeTemplate ? (
-                        <Badge variant="secondary" className="rounded-full text-[10px]">
+                        <Badge variant="secondary" className="max-w-[10rem] truncate rounded-full text-[10px]">
                           {activeTemplate.label}
                         </Badge>
                       ) : (
                         <Badge variant="secondary" className="rounded-full text-[10px]">
-                          アクションプラン
+                          武器未選択
                         </Badge>
                       )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className={cn(columnBodyClass, "min-h-0 flex-1 overflow-y-auto pb-2")}>
-                <div className={laneDividerClass}>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">STEP 1</p>
-                      <p className="text-sm font-medium">活用方法（いまの目的）</p>
-                    </div>
-                    <Badge variant="outline" className="rounded-full text-[10px]">
-                      {activePurpose.phase}
-                    </Badge>
-                  </div>
-                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                    事業フェーズに合わせて出力の型と鋭さを切り替えます。次に「武器」として共感・課題・論理のどれを前に出すかを選びます。
-                  </p>
-                  <div className="mt-3.5 grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
-                    {USAGE_PURPOSE_TILES.map((tile) => {
-                      const active = tile.id === usagePurposeId;
-                      const meta = USAGE_PURPOSE_TILE_META[tile.id];
-                      return (
+                      <div
+                        className="inline-flex items-center gap-0.5 rounded-full border border-border/35 bg-background/70 px-0.5 py-0.5 shadow-sm"
+                        title="OFF ではペルソナ・DNA・成功メモを外し、比較用の浅い一般論寄りの出力になります。"
+                      >
+                        <Filter className="ml-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden />
                         <button
-                          key={tile.id}
                           type="button"
-                          onClick={() => applyUsagePurpose(tile.id)}
                           className={cn(
-                            "min-h-[128px] rounded-2xl border border-border/25 bg-muted/20 px-3.5 py-3 text-left transition-all hover:bg-muted/40 sm:min-h-[118px] sm:px-3 sm:py-3.5",
-                            active &&
-                              "border-violet-400/55 bg-background shadow-[0_0_24px_-14px_rgba(124,58,237,0.5)] ring-2 ring-violet-500/45 ring-offset-1 ring-offset-zinc-50 dark:border-violet-500/40 dark:bg-violet-950/20 dark:ring-offset-background",
+                            "rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors",
+                            identityFilterOn
+                              ? "bg-violet-600 text-white shadow-sm"
+                              : "text-muted-foreground hover:text-foreground",
                           )}
+                          aria-pressed={identityFilterOn}
+                          onClick={() => {
+                            playSwitchClick();
+                            setIdentityFilterOn(true);
+                          }}
                         >
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-background/85 text-muted-foreground sm:size-8">
-                              {meta.icon}
-                            </span>
-                            <span className="max-w-[52%] text-right text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground/85">
-                              {tile.phase}
-                            </span>
-                          </div>
-                          <p className="mt-2.5 text-sm font-semibold leading-tight">{tile.label}</p>
-                          <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">{tile.summary}</p>
+                          ON
                         </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className={laneDividerClass}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">STEP 2</p>
-                      <p className="text-sm font-medium">武器（検証の型）</p>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">3スタイル</p>
-                  </div>
-                  <div className="mt-3.5 grid gap-2.5 md:grid-cols-3 md:gap-3">
-                    {strategyMatrixTiles.map((template) => {
-                      const active = template.id === activeTemplateId;
-                      const meta = STRATEGY_TILE_META[template.id];
-
-                      return (
                         <button
-                          key={template.id}
                           type="button"
-                          onClick={() => applyStrategyTemplate(template.id)}
                           className={cn(
-                            "flex min-h-[198px] flex-col rounded-[22px] border border-transparent bg-muted/25 px-3.5 pb-3.5 pt-3 text-left transition-all hover:bg-muted/40 md:min-h-[208px] md:rounded-[24px] md:px-4 md:pb-4 md:pt-3.5",
-                            active
-                              ? "border-violet-400/40 bg-white/90 shadow-[0_0_32px_-14px_rgba(124,58,237,0.55)] ring-2 ring-violet-500/50 ring-offset-1 ring-offset-white/80 dark:border-violet-500/35 dark:bg-background/85 dark:ring-violet-400/45 dark:ring-offset-background"
-                              : "border-border/15",
+                            "mr-0.5 rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors",
+                            !identityFilterOn
+                              ? "bg-zinc-600 text-white shadow-sm dark:bg-zinc-500"
+                              : "text-muted-foreground hover:text-foreground",
                           )}
+                          aria-pressed={!identityFilterOn}
+                          onClick={() => {
+                            playSwitchClick();
+                            setIdentityFilterOn(false);
+                          }}
                         >
-                          <div className="flex justify-end pb-0.5">
-                            <span className="inline-flex size-7 items-center justify-center rounded-full bg-background/80 text-muted-foreground md:size-8">
-                              {meta.icon}
-                            </span>
-                          </div>
-                          <div className="mt-3 flex-1 md:mt-3.5">
-                            <p className="text-[15px] font-semibold leading-snug md:text-base">{template.label}</p>
-                            <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground md:text-sm md:leading-6">
-                              {template.summary}
-                            </p>
-                          </div>
+                          OFF
                         </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {canChooseSprint ? (
-                  <div className={laneDividerClass}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold tracking-wide text-muted-foreground">STEP 3</p>
-                        <p className="text-sm font-medium">3ステップの実行の流れ</p>
                       </div>
-                      <p className="text-[11px] text-muted-foreground">生成で肉付け</p>
-                    </div>
-                    <div className="mt-4 grid gap-3 xl:grid-cols-3">
-                      {sprintTimelinePhases.map((phase) => (
-                        <div key={phase.rangeLabel} className="rounded-2xl bg-background/35 p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">{phase.rangeLabel}</p>
-                              <p className="mt-1 text-sm font-semibold">{phase.slot?.title ?? phase.focus}</p>
-                            </div>
-                            <Badge className={cn("rounded-full", phase.style.tone)}>{phase.focus}</Badge>
-                          </div>
-                          <p className="mt-3 text-sm font-medium">{phase.goal}</p>
-                          <p className="mt-1 text-xs leading-5 text-muted-foreground">{phase.objective}</p>
-                          <div className={cn("mt-4 rounded-xl p-3", phase.style.glow)}>
-                            <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">やること</p>
-                            <p className="mt-1 text-xs leading-5 text-muted-foreground">{phase.detail}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 px-1">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex size-8 items-center justify-center rounded-full bg-background/70 text-muted-foreground">
-                            <BookOpen className="size-4" />
-                          </span>
-                          <div>
-                            <p className="text-xs font-semibold tracking-wide text-muted-foreground">Vault Signal</p>
-                            <p className="text-sm font-medium">反応傾向を参照</p>
-                          </div>
-                        </div>
-                        <Badge variant="secondary" className="rounded-full">
-                          {archiveRecommendation ? "学習済み" : "学習待ち"}
-                        </Badge>
-                      </div>
-                      <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                        {archiveRecommendation?.summary ?? "Vault の反応ログを使って、進め方を調整します。"}
-                      </p>
-                      {archiveRecommendation ? (
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          {archiveToneLabel ? (
-                            <Badge variant="outline" className="rounded-full text-[11px]">
-                              推奨トーン: {archiveToneLabel}
-                            </Badge>
-                          ) : null}
-                          {archiveRecommendation.intensity != null ? (
-                            <Badge variant="outline" className="rounded-full text-[11px]">
-                              推奨強度: {archiveRecommendation.intensity}%
-                            </Badge>
-                          ) : null}
-                          {archiveRecommendation.emotion || archiveRecommendation.intensity != null ? (
-                            <Button type="button" variant="ghost" size="sm" onClick={applyArchiveRecommendationPreset} className="h-7 px-2 text-xs">
-                              保存する
-                            </Button>
-                          ) : null}
-                        </div>
-                      ) : null}
+                      <span className="text-[10px] text-muted-foreground">(Filter {identityFilterOn ? "ON" : "OFF"})</span>
                     </div>
                   </div>
-                ) : null}
+                  {!identityFilterOn ? (
+                    <p className="mt-1.5 text-[10px] leading-snug text-amber-800/90 dark:text-amber-200/85">
+                      OFF 時は Vanilla 比較用の浅い一般論寄り出力になります。
+                    </p>
+                  ) : null}
                 </div>
-              </section>
 
-              <section className={cn(columnCardClass, purposeSurface.cardBorder, "flex flex-col")}>
-                <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold tracking-tight text-foreground">LIVE OUTPUT</p>
-                        <p className="text-sm text-muted-foreground">
-                          Lab は作戦の錬成、Roadmap は実行と検証記録。生成後はモーダルで「作戦の契約書」を確認します。
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <div
-                          className="inline-flex items-center gap-1 rounded-full border border-border/35 bg-background/70 p-0.5 shadow-sm"
-                          title="OFF ではペルソナ・DNA・成功メモを外し、比較用の浅い一般論寄りの出力になります。"
-                        >
-                          <Filter className="ml-1 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                          <span className="hidden text-[10px] font-medium text-muted-foreground sm:inline">Filter</span>
-                          <button
-                            type="button"
-                            className={cn(
-                              "rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                              identityFilterOn
-                                ? "bg-violet-600 text-white shadow-sm"
-                                : "text-muted-foreground hover:text-foreground",
-                            )}
-                            aria-pressed={identityFilterOn}
-                            onClick={() => {
-                              playSwitchClick();
-                              setIdentityFilterOn(true);
-                            }}
-                          >
-                            ON
-                          </button>
-                          <button
-                            type="button"
-                            className={cn(
-                              "mr-0.5 rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                              !identityFilterOn
-                                ? "bg-zinc-600 text-white shadow-sm dark:bg-zinc-500"
-                                : "text-muted-foreground hover:text-foreground",
-                            )}
-                            aria-pressed={!identityFilterOn}
-                            onClick={() => {
-                              playSwitchClick();
-                              setIdentityFilterOn(false);
-                            }}
-                          >
-                            OFF
-                          </button>
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <div className={cn(columnBodyClass, "min-h-0 flex-1 overflow-y-auto pb-3")}>
+                    <div className={laneDividerClass}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold tracking-wide text-muted-foreground">STEP 2</p>
+                          <p className="text-sm font-medium">武器（検証の型）</p>
                         </div>
-                        <Badge variant="outline" className="shrink-0 rounded-full border-border/35 text-[10px] text-muted-foreground">
-                          アクション
-                        </Badge>
+                        <p className="text-[11px] text-muted-foreground">3スタイル</p>
                       </div>
-                    </div>
-                    {!identityFilterOn ? (
-                      <p className="text-[10px] leading-relaxed text-amber-800/90 dark:text-amber-200/85">
-                        Identity Filter OFF：次の「生成する」は比較用（Vanilla）。レポートは浅い一般論寄りになります。
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col">
-                <div className={cn(outputBodyClass, "space-y-4")}>
-                  <div className="space-y-4">
-                    {!loading && roadmapDeploySnap ? (
-                      <div className="rounded-2xl border border-emerald-200/60 bg-emerald-50/50 p-4 dark:border-emerald-900/45 dark:bg-emerald-950/20">
-                        <p className="text-[11px] font-semibold tracking-wide text-emerald-900 dark:text-emerald-100">
-                          Roadmap ステータス
-                        </p>
-                        <p className="mt-2 text-sm leading-relaxed text-foreground">
-                          現在、Roadmap にて作戦
-                          <span className="mx-1 font-semibold text-violet-700 dark:text-violet-200">
-                            「{roadmapDeploySnap.planTitle}」
-                          </span>
-                          を実行中です。検証フィードバックは Roadmap で入力してください。
-                        </p>
-                        {hasLiveOutput && lastSavedSeries?.id !== roadmapDeploySnap.seriesId ? (
-                          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                            ※ Lab に別の生成結果が表示されています。Roadmap のアクティブを切り替えるには、モーダルで新しい作戦をデプロイしてください。
-                          </p>
-                        ) : null}
-                        <Link
-                          href={`/roadmap?series=${roadmapDeploySnap.seriesId}`}
-                          className={cn(
-                            buttonVariants({ variant: "outline", size: "sm" }),
-                            "mt-3 inline-flex",
-                          )}
-                        >
-                          Roadmap を開く
-                        </Link>
-                      </div>
-                    ) : null}
+                      <div className="mt-3.5 grid gap-2.5 md:grid-cols-3 md:gap-3">
+                        {strategyMatrixTiles.map((template) => {
+                          const active = template.id === activeTemplateId;
+                          const meta = STRATEGY_TILE_META[template.id];
 
-                    {!loading && hasLiveOutput && !roadmapDeploySnap ? (
-                      <div className="rounded-2xl border border-amber-200/55 bg-amber-50/30 p-4 dark:border-amber-800/40 dark:bg-amber-950/15">
-                        <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100">作戦は未デプロイ</p>
-                        <p className="mt-2 text-sm leading-relaxed text-foreground">
-                          モーダルで「作戦の契約書」を確認し、Roadmap へ送るか破棄するかを決めてください。
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="mt-3"
-                          onClick={() => setResultsModalOpen(true)}
-                        >
-                          作戦の契約書を開く
-                        </Button>
-                      </div>
-                    ) : null}
-
-                    <div className="rounded-2xl border border-border/15 bg-background/50 p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
-                          AI Analysis Protocol（3ステップの役割）
-                        </p>
-                        <Badge variant="outline" className="rounded-full text-[10px]">
-                          {activePurpose.phase}
-                        </Badge>
-                      </div>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        「{activePurpose.label}」では、次の3ステップでアクションプランを出力します（API の指示と同じ役割です）。
-                      </p>
-                      <div className="mt-3 grid gap-2">
-                        {stepActionPreview.map((role, index) => (
-                          <div
-                            key={`${usagePurposeId}-${index}`}
-                            className="flex items-center gap-2.5 rounded-xl border border-border/30 bg-muted/12 px-3 py-2.5"
-                          >
-                            <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[10px] font-semibold text-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
-                              {index + 1}
-                            </span>
-                            <span className="text-xs font-medium text-foreground/90">STEP {index + 1}: {role}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-border/15 bg-background/40 p-4">
-                      <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">期待する反応</p>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        「{activePurpose.label}」に合わせた Vault 還流の観測スロット
-                      </p>
-                      <div className="mt-3 grid gap-2">
-                        {vaultReactionSlots.map((slot) => (
-                          <div
-                            key={slot}
-                            className="flex items-center gap-2.5 rounded-xl border border-dashed border-border/45 bg-muted/15 px-3 py-2.5"
-                          >
-                            <span className="size-1.5 shrink-0 rounded-full bg-violet-400/80" aria-hidden />
-                            <span className="text-xs font-medium text-foreground/85">{slot}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {!identityFilterOn ? (
-                      <div className="rounded-2xl border border-dashed border-border/40 bg-muted/10 p-4">
-                        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">Vanilla 比較（イメージ）</p>
-                        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-                          Identity を外したときに寄りやすい「どこにでも置ける」抽象案の雰囲気です（下の例は現在の種とは未連動の定型）。OFF
-                          のまま生成すると、API が同じ方針で実データを返します。
-                        </p>
-                        <ul className="mt-3 space-y-2">
-                          {VANILLA_COMPARISON_ACTION_PLAN.map((line, i) => (
-                            <li
-                              key={i}
-                              className="text-xs leading-relaxed text-muted-foreground/70 text-pretty dark:text-muted-foreground/65"
+                          return (
+                            <button
+                              key={template.id}
+                              type="button"
+                              onClick={() => applyStrategyTemplate(template.id)}
+                              className={cn(
+                                "flex min-h-[198px] flex-col rounded-[22px] border border-transparent bg-muted/25 px-3.5 pb-3.5 pt-3 text-left transition-all hover:bg-muted/40 md:min-h-[208px] md:rounded-[24px] md:px-4 md:pb-4 md:pt-3.5",
+                                active
+                                  ? "border-violet-400/40 bg-white/90 shadow-[0_0_32px_-14px_rgba(124,58,237,0.55)] ring-2 ring-violet-500/50 ring-offset-1 ring-offset-white/80 dark:border-violet-500/35 dark:bg-background/85 dark:ring-violet-400/45 dark:ring-offset-background"
+                                  : "border-border/15",
+                              )}
                             >
-                              {line}
-                            </li>
-                          ))}
-                        </ul>
+                              <div className="flex justify-end pb-0.5">
+                                <span className="inline-flex size-7 items-center justify-center rounded-full bg-background/80 text-muted-foreground md:size-8">
+                                  {meta.icon}
+                                </span>
+                              </div>
+                              <div className="mt-3 flex-1 md:mt-3.5">
+                                <p className="text-[15px] font-semibold leading-snug md:text-base">{template.label}</p>
+                                <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground md:text-sm md:leading-6">
+                                  {template.summary}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
-                    ) : null}
+                    </div>
 
-                    {!loading && hasLiveOutput && identityFilterOn && !resultsModalOpen ? (
-                      <div className="rounded-2xl border border-dashed border-amber-200/55 bg-amber-50/25 p-4 dark:border-amber-800/40 dark:bg-amber-950/15">
-                        <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100">Vanilla 比較メモ</p>
-                        {lastGenerationIdentityMode === "vanilla" ? (
-                          <p className="mt-1 text-xs leading-relaxed text-amber-950/85 dark:text-amber-100/85">
-                            直近の生成は Identity Filter OFF です。モーダル内が「浅い一般論寄り」の比較出力になっています。
+                    <div className={laneDividerClass}>
+                      <div className="rounded-2xl border border-border/15 bg-background/50 p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
+                            作戦のプレビュー（AI Analysis Protocol）
                           </p>
-                        ) : (
-                          <p className="mt-1 text-xs leading-relaxed text-amber-950/85 dark:text-amber-100/85">
-                            直近のレポートは Identity ON で生成されています。OFF
-                            の出力と並べて比較するには、OFF に切り替えてからもう一度「生成する」を押してください。
-                          </p>
-                        )}
-                        <ul className="mt-3 space-y-1.5 opacity-60">
-                          {VANILLA_COMPARISON_ACTION_PLAN.map((line, i) => (
-                            <li key={i} className="text-[11px] leading-relaxed text-muted-foreground line-clamp-2">
-                              {line}
-                            </li>
-                          ))}
-                        </ul>
+                          <Badge variant="outline" className="rounded-full text-[10px]">
+                            {activePurpose.phase}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          {activeTemplateId
+                            ? `武器「${activeTemplate?.label ?? ""}」に合わせ、次の 3STEP でアクションプランを組み立てます（API と同じ枠組み）。`
+                            : `武器を選ぶと STEP の見出しが切り替わります。いまは PHASE「${activePurpose.label}」の骨格を表示しています。`}
+                        </p>
+                        <AnimatePresence mode="wait" initial={false}>
+                          <motion.div
+                            key={`${usagePurposeId}-${activeTemplateId ?? "none"}`}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            transition={{ duration: 0.22, ease: "easeOut" }}
+                            className="mt-3 grid gap-2"
+                          >
+                            {protocolStepRows.map((row, index) => (
+                              <div
+                                key={`${usagePurposeId}-${activeTemplateId ?? "none"}-${index}`}
+                                className="rounded-xl border border-border/30 bg-muted/12 px-3 py-2.5"
+                              >
+                                <div className="flex items-start gap-2.5">
+                                  <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[10px] font-semibold text-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
+                                    {index + 1}
+                                  </span>
+                                  <div className="min-w-0 flex-1 space-y-0.5">
+                                    <p className="text-xs font-semibold leading-snug text-foreground/90">
+                                      STEP {index + 1}: {row.primary}
+                                    </p>
+                                    {row.sub ? (
+                                      <p className="text-[10px] leading-snug text-muted-foreground">{row.sub}</p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </motion.div>
+                        </AnimatePresence>
                       </div>
-                    ) : null}
+                    </div>
+
+                    <details className="group rounded-2xl border border-border/20 bg-muted/6 open:border-border/35 open:bg-muted/10">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-xs font-medium text-foreground marker:content-none [&::-webkit-details-marker]:hidden">
+                        <span>補助プレビュー（Vault 観測・Vanilla）</span>
+                        <span className="text-[10px] font-normal text-muted-foreground group-open:hidden">開く</span>
+                        <span className="hidden text-[10px] font-normal text-muted-foreground group-open:inline">閉じる</span>
+                      </summary>
+                      <div className="space-y-3 border-t border-border/15 px-3 pb-3 pt-2">
+                        <div>
+                          <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">期待する反応</p>
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                            「{activePurpose.label}」に合わせた Vault 還流の観測スロット
+                          </p>
+                          <div className="mt-2 grid gap-2">
+                            {vaultReactionSlots.map((slot) => (
+                              <div
+                                key={slot}
+                                className="flex items-center gap-2.5 rounded-xl border border-dashed border-border/45 bg-muted/15 px-3 py-2"
+                              >
+                                <span className="size-1.5 shrink-0 rounded-full bg-violet-400/80" aria-hidden />
+                                <span className="text-xs font-medium text-foreground/85">{slot}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        {!identityFilterOn ? (
+                          <div className="rounded-xl border border-dashed border-border/40 bg-muted/10 p-3">
+                            <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">Vanilla 比較（イメージ）</p>
+                            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                              Identity OFF 時に寄りやすい抽象案の雰囲気（種とは未連動の定型）。
+                            </p>
+                            <ul className="mt-2 space-y-1.5">
+                              {VANILLA_COMPARISON_ACTION_PLAN.map((line, i) => (
+                                <li
+                                  key={i}
+                                  className="text-[11px] leading-relaxed text-muted-foreground/75 text-pretty dark:text-muted-foreground/70"
+                                >
+                                  {line}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        {!loading && hasLiveOutput && identityFilterOn && !resultsModalOpen ? (
+                          <div className="rounded-xl border border-dashed border-amber-200/55 bg-amber-50/25 p-3 dark:border-amber-800/40 dark:bg-amber-950/15">
+                            <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100">Vanilla 比較メモ</p>
+                            {lastGenerationIdentityMode === "vanilla" ? (
+                              <p className="mt-1 text-xs leading-relaxed text-amber-950/85 dark:text-amber-100/85">
+                                直近の生成は Identity Filter OFF です。モーダル内が「浅い一般論寄り」の比較出力になっています。
+                              </p>
+                            ) : (
+                              <p className="mt-1 text-xs leading-relaxed text-amber-950/85 dark:text-amber-100/85">
+                                直近のレポートは Identity ON です。OFF と比較するには OFF に切り替えてから「生成する」を押してください。
+                              </p>
+                            )}
+                            <ul className="mt-2 space-y-1 opacity-60">
+                              {VANILLA_COMPARISON_ACTION_PLAN.map((line, i) => (
+                                <li key={i} className="text-[10px] leading-relaxed text-muted-foreground line-clamp-2">
+                                  {line}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    </details>
+
+                    <AnimatePresence mode="wait">
+                      {loading ? (
+                        <motion.div key="sk" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                          <GenerationSkeleton />
+                        </motion.div>
+                      ) : null}
+                    </AnimatePresence>
                   </div>
 
-                  <AnimatePresence mode="wait">
-                    {loading ? (
-                      <motion.div key="sk" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                        <GenerationSkeleton />
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-                </div>
-
-                <div className="shrink-0 space-y-3 border-t border-border/15 bg-linear-to-t from-background/95 to-background/70 px-4 py-3 dark:from-background/90 dark:to-background/55">
+                <div
+                  className={cn(
+                    "z-20 shrink-0 space-y-3 border-t border-border/25 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]",
+                    "bg-background/92 backdrop-blur-md shadow-[0_-10px_40px_-22px_rgba(15,23,42,0.16)] dark:bg-background/88 dark:shadow-[0_-12px_48px_-24px_rgba(0,0,0,0.48)]",
+                    "max-lg:sticky max-lg:bottom-0",
+                  )}
+                >
                   {error ? <p className="text-center text-sm text-destructive">{error}</p> : null}
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground/70">DEPLOY</p>
-                      <p className="mt-1 text-sm font-medium leading-snug">{deployTitle}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{deployHint}</p>
-                      <ul className="mt-2 space-y-1 text-[10px] leading-relaxed text-muted-foreground">
-                        <li>
-                          <span className="font-semibold text-foreground/80">コア・コンセプト: </span>
-                          {deployOutputComposition.coreConcept}
-                        </li>
-                        <li>
-                          <span className="font-semibold text-foreground/80">思考の深さ: </span>
-                          {deployOutputComposition.thinkingDepth}
-                        </li>
-                        <li>
-                          <span className="font-semibold text-foreground/80">次のアクション: </span>
-                          {deployOutputComposition.nextAction}
-                        </li>
-                      </ul>
+                      {!canDeploy && !loading && deployGateHints.length > 0 ? (
+                        <p
+                          id="lab-deploy-gate-hints"
+                          className="text-[11px] font-medium leading-snug text-amber-900 dark:text-amber-100"
+                        >
+                          あと{deployGateHints.join("・")}が必要です。
+                        </p>
+                      ) : null}
+                      {loading ? (
+                        <p className="text-[11px] leading-snug text-muted-foreground">生成が終わると「作戦の契約書」が開きます。</p>
+                      ) : null}
+                      {hasLiveOutput && !resultsModalOpen && !loading ? (
+                        <button
+                          type="button"
+                          className="mb-2 text-left text-[11px] font-medium text-violet-700 underline-offset-2 hover:underline dark:text-violet-300"
+                          onClick={() => setResultsModalOpen(true)}
+                        >
+                          作戦の契約書を開く
+                        </button>
+                      ) : null}
+                      {canDeploy ? (
+                        <>
+                          <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground/70">DEPLOY</p>
+                          <p className="mt-1 text-sm font-medium leading-snug">{deployTitle}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{deployHint}</p>
+                          <ul className="mt-2 space-y-1 text-[10px] leading-relaxed text-muted-foreground">
+                            <li>
+                              <span className="font-semibold text-foreground/80">コア・コンセプト: </span>
+                              {deployOutputComposition.coreConcept}
+                            </li>
+                            <li>
+                              <span className="font-semibold text-foreground/80">思考の深さ: </span>
+                              {deployOutputComposition.thinkingDepth}
+                            </li>
+                            <li>
+                              <span className="font-semibold text-foreground/80">次のアクション: </span>
+                              {deployOutputComposition.nextAction}
+                            </li>
+                          </ul>
+                        </>
+                      ) : null}
                     </div>
                     <Button
                       type="button"
                       size="sm"
                       disabled={!canDeploy}
+                      aria-describedby={!canDeploy && deployGateHints.length > 0 && !loading ? "lab-deploy-gate-hints" : undefined}
                       onClick={() => {
                         void runGenerate();
                       }}
                       className={cn(
-                        "w-full min-w-0 shrink-0 bg-linear-to-r from-fuchsia-600 via-violet-600 to-purple-600 text-white hover:from-fuchsia-500 hover:via-violet-500 hover:to-purple-500 md:w-auto md:min-w-[184px]",
-                        "shadow-[0_0_44px_-8px_rgba(192,38,211,0.95)] ring-1 ring-fuchsia-300/45",
+                        "w-full min-w-0 shrink-0 md:w-auto md:min-w-[184px] transition-[filter,opacity,box-shadow,background-image] duration-300",
+                        canDeploy
+                          ? "bg-linear-to-r from-fuchsia-600 via-violet-600 to-purple-600 text-white shadow-[0_0_44px_-8px_rgba(192,38,211,0.95)] ring-1 ring-fuchsia-300/45 hover:from-fuchsia-500 hover:via-violet-500 hover:to-purple-500"
+                          : "bg-muted text-muted-foreground opacity-55 grayscale ring-0 shadow-none dark:bg-muted/80",
                       )}
                     >
                       {loading ? "生成中…" : "生成する"}
@@ -1510,7 +1906,8 @@ export function MainLabWorkspace() {
                   </p>
                 </div>
                 <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted-foreground">
-                  {dnaAlignmentReason ?? "SEED と Identity DNA の距離感から推定しています。"}
+                  {dnaAlignmentReason ??
+                    "SEED の入力埋まり・Identity DNA・仮説キャンバスから推定しています。"}
                 </p>
               </div>
             </div>
@@ -1611,6 +2008,45 @@ export function MainLabWorkspace() {
                     })}
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-border/15 bg-muted/12 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex size-8 items-center justify-center rounded-full bg-background/70 text-muted-foreground">
+                      <BookOpen className="size-4" />
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">Vault Signal</p>
+                      <p className="text-sm font-medium text-foreground">反応傾向を参照</p>
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full">
+                    {archiveRecommendation ? "学習済み" : "学習待ち"}
+                  </Badge>
+                </div>
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                  {archiveRecommendation?.summary ?? "Vault の反応ログを使って、進め方を調整します。生成後の判断材料として使えます。"}
+                </p>
+                {archiveRecommendation ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {archiveToneLabel ? (
+                      <Badge variant="outline" className="rounded-full text-[11px]">
+                        推奨トーン: {archiveToneLabel}
+                      </Badge>
+                    ) : null}
+                    {archiveRecommendation.intensity != null ? (
+                      <Badge variant="outline" className="rounded-full text-[11px]">
+                        推奨強度: {archiveRecommendation.intensity}%
+                      </Badge>
+                    ) : null}
+                    {archiveRecommendation.emotion || archiveRecommendation.intensity != null ? (
+                      <Button type="button" variant="ghost" size="sm" onClick={applyArchiveRecommendationPreset} className="h-7 px-2 text-xs">
+                        Lab に反映する
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
             </div>

@@ -13,7 +13,8 @@ const USAGE_PURPOSE_LABEL_SHORT: Record<UsagePurposeKey, string> = {
  * 活用方法 × 武器（strategyGoal）の掛け算（内容面の寄せ方）。
  * generate-triple の system に差し込む。スキーマ遵守は別行で明示し、ここでは過剰な「最優先」表現を避ける。
  */
-const COMBO_BODIES: Record<UsagePurposeKey, Record<StrategyGoal, string>> = {
+/** ストレステスト用に export（対極組み合わせの文言差分を検証） */
+export const COMBO_BODIES: Record<UsagePurposeKey, Record<StrategyGoal, string>> = {
   discovery: {
     empathy:
       "広がりを損なわず、見過ごされた痛みへの共感から入り、同じ痛みを持つ層の小さな反応を取る仮説ポートフォリオを、3ステップのアクションプランで具体化してください。",
@@ -47,6 +48,45 @@ const COMBO_BODIES: Record<UsagePurposeKey, Record<StrategyGoal, string>> = {
       "一文の根拠・流れ・CTAまで論理一貫で組み、説得と行動を両取りする3ステップのアクションプランを構築してください。",
   },
 };
+
+/** 用途×武器が相反しやすい組み合わせでの「優先順位」一行（平均化回避） */
+const POLARITY_TIE_BREAK: Partial<Record<UsagePurposeKey, Partial<Record<StrategyGoal, string>>>> = {
+  communication: {
+    logic:
+      "【相反の板挟み解消】短文の打ち力を最優先。論理は各 body 内で「主張1＋理由1行＋数字または事例1つ」に圧縮し、長い段落や箇条書きの羅列は禁止。immediateAction は必ず投稿・出稿・送付・撮影のいずれかの動詞で始める。",
+    empathy:
+      "【相反の板挟み解消】感情のフックは各 body の先頭1〜2文に集約し、チャネル名とCTAは短く具体名で書く。心情描写で immediateAction を圧迫しない。",
+  },
+  refinement: {
+    empathy:
+      "【相反の板挟み解消】共感の具体のあと、各 body の末尾に検証可能な一文仮説を必ず置く。感情描写だけで終わらせない。",
+    logic:
+      "【相反の板挟み解消】論理の厳密さを保ちつつ、人間味は短い場面1つに限定し、各 body は3文以内を目安にする。",
+  },
+  discovery: {
+    logic:
+      "【相反の板挟み解消】論点整理と探索の広がりは「比較仮説を並べる」形で示し、各ステップで結論を1つに決めつけない。",
+  },
+  blueprint: {
+    empathy:
+      "【相反の板挟み解消】物語と共感の厚みは STEP1 に寄せ、STEP2 以降は提供方法・プロトタイプにフォーカスを移して重複させない。",
+  },
+};
+
+export function buildComboPolarityTieBreakLine(
+  purpose: UsagePurposeKey,
+  goal: StrategyGoal,
+): string | null {
+  return POLARITY_TIE_BREAK[purpose]?.[goal] ?? null;
+}
+
+/** 限界検証で優先したい対極寄りの組み合わせ（COMBO + 板挟み解消の両方を確認） */
+export const STRESS_COMBO_VERIFICATION_TARGETS = [
+  { purpose: "communication" as const, goal: "logic" as const },
+  { purpose: "refinement" as const, goal: "empathy" as const },
+  { purpose: "communication" as const, goal: "empathy" as const },
+  { purpose: "discovery" as const, goal: "logic" as const },
+] as const;
 
 export function buildUsagePurposeStrategyComboDirective(
   purpose: UsagePurposeKey,

@@ -1,11 +1,13 @@
 import { DATA_SYNC_EVENT } from "@/lib/data-sync";
+import { coercePlanItemBodyAndImmediate } from "@/lib/plan-item-coerce";
+import { findPlanBodyImmediateSplit, PLAN_IMMEDIATE_ACTION_MARK, storedBodyContainsImmediateMarker } from "@/lib/plan-immediate-mark";
 
 const DEPLOY_CTX_KEY = "emoswitch_roadmap_deploy_ctx_v1";
 const FIELD_LOG_KEY = "emoswitch_identity_field_buffer_v1";
 const FIRST_ACTION_DONE_KEY = "emoswitch_roadmap_first_action_done_v1";
 const CHECKLIST_KEY = "emoswitch_roadmap_checklist_v1";
 
-export const STORED_IMMEDIATE_ACTION_MARK = "【すぐやること】";
+export const STORED_IMMEDIATE_ACTION_MARK = PLAN_IMMEDIATE_ACTION_MARK;
 
 export type RoadmapDeployProtocolLineV1 = {
   hat: string;
@@ -94,20 +96,22 @@ export function clearIdentityFieldLog(): void {
 }
 
 export function splitStoredPlanBody(body: string): { narrative: string; immediate: string | null } {
-  const mark = STORED_IMMEDIATE_ACTION_MARK;
-  const idx = body.indexOf(mark);
-  if (idx === -1) return { narrative: body.trim(), immediate: null };
+  const hit = findPlanBodyImmediateSplit(body);
+  if (hit === null) return { narrative: body.trim(), immediate: null };
   return {
-    narrative: body.slice(0, idx).trim(),
-    immediate: body.slice(idx + mark.length).trim() || null,
+    narrative: body.slice(0, hit.idx).trim(),
+    immediate: body.slice(hit.idx + hit.mark.length).trim() || null,
   };
 }
 
 /** Lab 保存時: API の body + immediateAction を1フィールドに結合（Roadmap 側は splitStoredPlanBody で復元） */
 export function mergeStoredPlanBodyForStorage(body: string, immediateAction: string): string {
-  const action = immediateAction.trim();
-  if (!action) return body.trim();
-  return `${body.trim()}\n\n${STORED_IMMEDIATE_ACTION_MARK}${action}`;
+  const trimmed = immediateAction.trim();
+  if (!trimmed && !storedBodyContainsImmediateMarker(body)) {
+    return body.trim();
+  }
+  const { body: b, immediateAction: a } = coercePlanItemBodyAndImmediate(body, immediateAction);
+  return `${b.trim()}\n\n${STORED_IMMEDIATE_ACTION_MARK}${a}`;
 }
 
 export function readRoadmapDeployContext(): RoadmapDeployContextV1 | null {

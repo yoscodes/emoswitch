@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { PLAN_IMMEDIATE_ACTION_MARK_FULLWIDTH_COLON } from "./plan-immediate-mark";
 import {
   mergeStoredPlanBodyForStorage,
   splitStoredPlanBody,
@@ -44,5 +45,15 @@ describe("mergeStoredPlanBodyForStorage + splitStoredPlanBody", () => {
   it("immediate が空ならマークを付けず結合も空扱い", () => {
     const apiBody = "本文のみ";
     expect(mergeStoredPlanBodyForStorage(apiBody, "  ")).toBe(apiBody);
+  });
+
+  it("レガシーマーカー（コロンなし）の保存本文も分割できる", () => {
+    const stored = "本文\n\n【すぐやること】走る。";
+    expect(splitStoredPlanBody(stored)).toEqual({ narrative: "本文", immediate: "走る。" });
+  });
+
+  it("全角コロン付きマーカーでも split できる", () => {
+    const stored = `本文\n\n${PLAN_IMMEDIATE_ACTION_MARK_FULLWIDTH_COLON}動く。`;
+    expect(splitStoredPlanBody(stored)).toEqual({ narrative: "本文", immediate: "動く。" });
   });
 });
