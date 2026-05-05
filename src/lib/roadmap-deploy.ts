@@ -88,6 +88,20 @@ export function summarizeIdentityFieldBuffer(logs: readonly IdentityFieldLogEntr
   return { total: logs.length, hot, cold, withMemo };
 }
 
+/** Lab の Scrap 先頭へ貼る用。Roadmap 検証バッファをそのまま Raw Context に混ぜられる */
+export function formatIdentityFieldBufferForLabScrap(entries: readonly IdentityFieldLogEntryV1[]): string {
+  if (entries.length === 0) return "";
+  const lines = entries.map((e, i) => {
+    const fb =
+      e.quickFeedback === "hot" ? "反応あり" : e.quickFeedback === "cold" ? "刺さらず" : "反応ラベル未設定";
+    const parts: string[] = [`${i + 1}. [${fb}]`];
+    if (e.likes != null && e.likes > 0) parts.push(`数値: ${e.likes}`);
+    if (e.memo?.trim()) parts.push(`想定とのズレ: ${e.memo.trim()}`);
+    return parts.join(" ");
+  });
+  return `【前回の検証からの学び（Roadmap・${entries.length}件）】\n${lines.join("\n")}\n`;
+}
+
 /** Identity 側で還流を取り込んだあと、バッファを空にする */
 export function clearIdentityFieldLog(): void {
   if (typeof window === "undefined") return;

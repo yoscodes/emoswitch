@@ -30,7 +30,8 @@ import {
   writeRoadmapChecklist,
   type RoadmapDeployContextV1,
 } from "@/lib/roadmap-deploy";
-import type { ArchiveOverview, GenerationSeriesItemRecord, GenerationSeriesRecord, QuickFeedback } from "@/lib/types";
+import { sortSeriesLikeItemsBySlotOrder } from "@/lib/series";
+import type { ArchiveOverview, GenerationSeriesRecord, QuickFeedback } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function formatDate(value: string) {
@@ -47,20 +48,16 @@ function isSeriesRecord(entry: { generationMode: string }): entry is GenerationS
   return entry.generationMode === "series";
 }
 
-/** Lab デプロイ時の共鳴％をベースに、チェック完了と検証入力で「目的からのブレ」を近似する（0–100） */
+/** Lab デプロイ時の共鳴％をベースに、検証入力（反応・メモ・数値）だけで「実行後のズレ」を近似する（0–100）。チェックリスト進捗は含めない */
 function computeRealtimeAlignmentPercent(params: {
   baselinePercent: number | null;
   series: GenerationSeriesRecord;
-  checklist: boolean[];
 }): number {
   const baseRaw =
     typeof params.baselinePercent === "number" && !Number.isNaN(params.baselinePercent)
       ? params.baselinePercent
       : null;
   const base = baseRaw != null ? Math.min(100, Math.max(0, Math.round(baseRaw))) : 52;
-
-  const checks = params.checklist.filter(Boolean).length;
-  const checklistBonus = Math.min(15, checks * 3);
 
   let execution = 0;
   for (const item of params.series.items) {
@@ -71,21 +68,29 @@ function computeRealtimeAlignmentPercent(params: {
   }
   execution = Math.min(25, Math.max(-22, execution));
 
-  return Math.min(100, Math.max(8, Math.round(base + checklistBonus + execution)));
+  return Math.min(100, Math.max(8, Math.round(base + execution)));
 }
 
-/** 市場の反応・メモ・数値・タスク完了を「知見」としてカウント */
-function countInsightsCollected(params: { series: GenerationSeriesRecord; checklist: boolean[] }): number {
+const CHECKLIST_SLOT_TOTAL = 5;
+
+/** 市場の反応・メモ・数値だけを「知見」としてカウント（チェック完了は進捗側の指標と分離） */
+function countInsightsCollected(params: { series: GenerationSeriesRecord }): number {
   let n = 0;
-  for (const done of params.checklist) {
-    if (done) n += 1;
-  }
   for (const item of params.series.items) {
     if (item.quickFeedback != null) n += 1;
     if (item.memo?.trim()) n += 1;
     if (item.likes != null && item.likes > 0) n += 1;
   }
   return n;
+}
+
+function checklistDoneCount(checklist: boolean[]): number {
+  return checklist.filter(Boolean).length;
+}
+
+function operationProgressPercent(checklist: boolean[]): number {
+  const done = checklistDoneCount(checklist);
+  return Math.round((done / CHECKLIST_SLOT_TOTAL) * 100);
 }
 
 function evolutionHint(insights: ArchiveOverview["insights"], seriesEmotion: EmotionTone): string | null {
@@ -203,7 +208,12 @@ export function RoadmapWorkspace() {
     return null;
   }, [activeSeries, deployCtx]);
 
-  const anchorItem = activeSeries?.items[0] ?? null;
+  const seriesItemsTimeline = useMemo(
+    () => (activeSeries ? sortSeriesLikeItemsBySlotOrder(activeSeries.items) : []),
+    [activeSeries],
+  );
+
+  const anchorItem = seriesItemsTimeline[0] ?? null;
 
   useEffect(() => {
     if (!activeSeries) {
@@ -231,24 +241,25 @@ export function RoadmapWorkspace() {
     return computeRealtimeAlignmentPercent({
       baselinePercent: ctxEffective?.identityResonancePercent ?? null,
       series: activeSeries,
-      checklist,
     });
-  }, [activeSeries, checklist, ctxEffective]);
+  }, [activeSeries, ctxEffective]);
 
   const insightsCollectedCount = useMemo(() => {
     if (!activeSeries) return 0;
-    return countInsightsCollected({ series: activeSeries, checklist });
-  }, [activeSeries, checklist]);
+    return countInsightsCollected({ series: activeSeries });
+  }, [activeSeries]);
+
+  const checklistProgressDone = useMemo(() => checklistDoneCount(checklist), [checklist]);
+  const checklistProgressPercent = useMemo(() => operationProgressPercent(checklist), [checklist]);
 
   const missionFinalGoal = ctxEffective?.finalGoal ?? "次の検証で、市場から確かな反応を取りにいく。";
   const missionFirst = ctxEffective?.firstAction ?? "まずは最小の投稿またはDMで仮説を一文に落とす。";
 
   const allHashtags = useMemo(() => {
-    if (!activeSeries) return [];
     const set = new Set<string>();
-    activeSeries.items.forEach((item) => item.hashtags.forEach((t) => set.add(t)));
+    seriesItemsTimeline.forEach((item) => item.hashtags.forEach((t) => set.add(t)));
     return [...set];
-  }, [activeSeries]);
+  }, [seriesItemsTimeline]);
 
   const evolution = overview?.insights && activeSeries ? evolutionHint(overview.insights, activeSeries.emotion) : null;
 
@@ -404,12 +415,9 @@ export function RoadmapWorkspace() {
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:text-amber-100">
                   Identity DNA — 今回守るべきスタンス
                 </p>
-                <p
-                  className="mt-1.5 text-sm font-semibold leading-snug text-amber-950 dark:text-amber-50"
-                  title={activeSeries.ghostWhisper?.trim() ?? undefined}
-                >
+                <p className="mt-1.5 text-sm font-semibold leading-relaxed wrap-break-word text-amber-950 dark:text-amber-50">
                   {activeSeries.ghostWhisper?.trim() ? (
-                    <span className="line-clamp-1">{activeSeries.ghostWhisper.trim()}</span>
+                    activeSeries.ghostWhisper.trim()
                   ) : (
                     <span className="font-normal text-muted-foreground">
                       Lab で Identity Filter ON の連載を生成すると、Ghost Whisper がここに表示されます。
@@ -418,25 +426,38 @@ export function RoadmapWorkspace() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-start justify-between gap-6">
-                <div className="min-w-0 flex-1">
+              <div className="grid gap-6 sm:grid-cols-3 sm:gap-4">
+                <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Identity 共鳴度（リアルタイム整合）
+                    Identity 共鳴度（Alignment）
                   </p>
                   <p className="mt-2 text-4xl font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-200">
                     {realtimeAlignmentPercent}
                     <span className="text-lg font-semibold">%</span>
                   </p>
                   <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                    Lab 生成時の共鳴を起点に、アクションのチェックと検証フィードバックのたびに更新されます。当初の目的からブレず進めているかの目安です。
+                    Lab デプロイ時の共鳴を起点に、検証フィードバック（反応・メモ・数値）で更新されます。チェックリストの完了数は含みません。
                   </p>
                 </div>
-                <div className="w-full shrink-0 border-t border-border/20 pt-4 sm:w-auto sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0 md:min-w-[200px]">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">獲得した知見</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Insights Collected</p>
+                <div className="min-w-0 border-t border-border/20 pt-4 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">作戦の進捗</p>
+                  <p className="mt-2 text-4xl font-bold tabular-nums tracking-tight text-teal-700 dark:text-teal-200">
+                    {checklistProgressPercent}
+                    <span className="text-lg font-semibold">%</span>
+                  </p>
+                  <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                    {checklistProgressDone}/{CHECKLIST_SLOT_TOTAL} チェック完了
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                    First Action・各 STEP・最終目標のチェックのみ。実行の足取りとしての進捗率です。
+                  </p>
+                </div>
+                <div className="min-w-0 border-t border-border/20 pt-4 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">蓄積された知見</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Insights</p>
                   <p className="mt-2 text-3xl font-bold tabular-nums text-fuchsia-700 dark:text-fuchsia-200">{insightsCollectedCount}</p>
-                  <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                    タスク完了・反応記録・メモ・数値入力の合計です（市場からの手がかりと気づきのストック）。
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                    反応記録・検証メモ・数値入力の件数です（市場からの手がかりのストック。Identity バッファへ送る内容の材料になります）。
                   </p>
                 </div>
               </div>
@@ -509,7 +530,7 @@ export function RoadmapWorkspace() {
                   <div>
                     <p className="text-xs font-semibold tracking-wide text-muted-foreground">アクションツリー</p>
                     <ol className="mt-3 space-y-3 border-l-2 border-dashed border-border/60 pl-4">
-                      {activeSeries.items.map((item, index) => {
+                      {seriesItemsTimeline.map((item, index) => {
                         const { narrative, immediate } = splitStoredPlanBody(item.body);
                         const verifiedHot = Boolean(item.quickFeedback === "hot");
                         const checklistIndex = index + 1;
@@ -582,7 +603,7 @@ export function RoadmapWorkspace() {
                   </button>
                   {bodyOpen ? (
                     <div className="space-y-3 rounded-xl border border-dashed bg-background/80 p-3">
-                      {activeSeries.items.map((item) => {
+                      {seriesItemsTimeline.map((item) => {
                         const { narrative } = splitStoredPlanBody(item.body);
                         return (
                           <div key={`acc-${item.id}`}>
@@ -622,7 +643,9 @@ export function RoadmapWorkspace() {
               <Card>
                 <CardHeader>
                   <p className="text-sm font-semibold">検証フィードバック</p>
-                  <p className="text-xs text-muted-foreground">STEP 1 実行直後の反応を記録します（Identity 用フィールドバッファにも積みます）。</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    STEP 1 実行直後の事実を残します。ここで書いた「想定とのズレ」は送信時に Identity 用バッファへ積まれ、/identity で DNA を直すときの一次資料になります。
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-2">
@@ -648,8 +671,20 @@ export function RoadmapWorkspace() {
                       刺さらず
                     </Button>
                   </div>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-semibold text-foreground">想定と何が違ったか（Identity へ還流）</span>
+                    <span className="block text-[11px] leading-relaxed text-muted-foreground">
+                      Lab で立てた仮説・トーンと、実際の反応や自分の違和感の差を文章で残してください。空でも送信できますが、DNA 調整にはここが効きます。
+                    </span>
+                    <Textarea
+                      value={memoInput}
+                      onChange={(e) => setMemoInput(e.target.value)}
+                      className="min-h-[120px] border-border"
+                      placeholder="例: 想定では共感コメントが来るはずだったが、保存ばかり増えた。Ghost の一文が強すぎた可能性がある。"
+                    />
+                  </label>
                   <label className="block space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">いいね数など</span>
+                    <span className="text-xs font-medium text-muted-foreground">任意：いいね数などの数値</span>
                     <input
                       type="number"
                       min={0}
@@ -657,27 +692,21 @@ export function RoadmapWorkspace() {
                       value={likesInput}
                       onChange={(e) => setLikesInput(e.target.value)}
                       className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
-                      placeholder="例: 12"
-                    />
-                  </label>
-                  <label className="block space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">検証メモ</span>
-                    <Textarea
-                      value={memoInput}
-                      onChange={(e) => setMemoInput(e.target.value)}
-                      className="min-h-[100px] border-border"
-                      placeholder="現場での違和感、次に変える一言など"
+                      placeholder="例: 12（補助指標）"
                     />
                   </label>
                   <Button type="button" className="w-full" disabled={feedbackSaving || !anchorItem} onClick={() => void saveFeedback()}>
-                    {feedbackSaving ? "送信中…" : "結果を送信"}
+                    {feedbackSaving ? "送信中…" : "結果を Identity バッファへ送信"}
                   </Button>
                   <Link
                     href="/identity"
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex w-full justify-center")}
+                    className={cn(buttonVariants({ variant: "default", size: "sm" }), "inline-flex w-full justify-center bg-violet-600 hover:bg-violet-500")}
                   >
-                    Identity で DNA を整える
+                    Identity でズレを取り込む
                   </Link>
+                  <p className="text-center text-[11px] text-muted-foreground">
+                    数値だけでなく、上のメモが次の生成に還流しやすくなります。
+                  </p>
                 </CardContent>
               </Card>
             </aside>

@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       );
     }
     const modelName =
-      speedMode === "pro" ? "gemini-1.5-pro-latest" : "gemini-1.5-flash-latest";
+      speedMode === "pro" ? "gemini-2.5-pro" : "gemini-2.5-flash";
 
     const system = [
       "あなたはSNS投稿に強い日本語コピーライターです。",

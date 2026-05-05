@@ -5,7 +5,7 @@ import { RoadmapWorkspace } from "@/components/roadmap-workspace";
 
 export const metadata: Metadata = {
   title: "Roadmap",
-  description: "生存状況・実行プロトコル・検証報告を一つの時系列で扱うダッシュボード",
+  description: "Identity との整合・作戦進捗・検証知見をまとめて扱う戦略検証ダッシュボード",
 };
 
 export default function RoadmapPage() {

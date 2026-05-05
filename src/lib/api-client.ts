@@ -280,6 +280,8 @@ export async function generateTriple(payload: GenerateTriplePayload): Promise<Ge
 export type OrganizeScrapDraftResponse = {
   audience: string;
   pain: string;
+  firstExperiment: string;
+  whyNow: string;
 };
 
 /** 下書き（Scrap）を①誰に？②どんな悩み？に仮整理する（生成とは別コール） */

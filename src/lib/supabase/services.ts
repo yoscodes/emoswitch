@@ -6,7 +6,7 @@ import {
   type ArchiveInsightSingleInput,
 } from "@/lib/archive-insights";
 import { inferMemoryTags } from "@/lib/memory-tags";
-import { getSeriesSlotLabel, type SeriesSlotKey } from "@/lib/series";
+import { compareSeriesSlotKey, getSeriesSlotLabel, type SeriesSlotKey } from "@/lib/series";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type {
   ArchiveOverview,
@@ -524,7 +524,11 @@ function deriveSeriesFeedback(items: GenerationSeriesItemRecord[]): QuickFeedbac
 function mapSeries(row: DbSeriesRow, items: DbSeriesItemRow[]): GenerationSeriesRecord {
   const mappedItems = items
     .filter((item) => item.deleted_at == null)
-    .sort((left, right) => left.created_at.localeCompare(right.created_at))
+    .sort((left, right) => {
+      const bySlot = compareSeriesSlotKey(left.slot_key, right.slot_key);
+      if (bySlot !== 0) return bySlot;
+      return left.created_at.localeCompare(right.created_at);
+    })
     .map(mapSeriesItem);
 
   return {
@@ -642,6 +646,11 @@ function mapSeriesFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): G
     })(),
     memoryTags: asArray(item.memory_tags),
   }));
+  items.sort((left, right) => {
+    const bySlot = compareSeriesSlotKey(left.slotKey, right.slotKey);
+    if (bySlot !== 0) return bySlot;
+    return left.createdAt.localeCompare(right.createdAt);
+  });
 
   return {
     id: canonicalSeriesId,

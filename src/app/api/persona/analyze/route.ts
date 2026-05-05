@@ -2,6 +2,11 @@ import { google } from "@ai-sdk/google";
 import { generateObject } from "ai";
 import { z } from "zod";
 
+import {
+  formatAiGatewayErrorForClient,
+  getAiGatewayErrorHttpStatus,
+  withGeminiQuotaAwareRetry,
+} from "@/lib/ai-quota-retry";
 import { dnaAxesSchema } from "@/lib/identity-dna-schema";
 import { getArchiveOverview, getGhostSettings, getIdentityProfile, listGenerations, listHotGenerationMemories, resolveRequestActor, saveGhostSettings, saveIdentityProfile } from "@/lib/supabase/services";
 
@@ -186,35 +191,38 @@ export async function POST(request: Request) {
       );
     }
 
-    const { object } = await generateObject({
-      model: google("gemini-1.5-flash-latest"),
-      schema: personaSchema,
-      system: [
-        "あなたは起業家の思想・強み・価値観を整理する日本語ストラテジストです。",
-        "入力された断片から、その人がどんな事業を育てやすいかをユーザーに説明可能な形で整理してください。",
-        "keywords は5個ちょうど。次の5軸を1つずつ表すこと: 問題意識 / 強み / 価値観 / 顧客への向き合い方 / 発信スタンス。",
-        "各キーワードは日本語で2〜10文字程度、抽象語だけに逃げず、本人らしさが伝わる言葉にする。",
-        "summary は、その人がどんな思想で事業の種を選び、どんな市場への向き合い方をしそうかを日本語で要約する。",
-        "evidence は、なぜそう判断したかをユーザーが納得できる説明文にする。",
-        "stylePrompt は、生成時にそのまま使える『起業家スタンスメモ』として一文に整える。",
-        "二択DNAは、その人の価値観の土台として強く反映する。",
-        "Anti-Persona は『こうはなりたくない』『こうは語りたくない』という境界線として扱い、summary と stylePrompt に必ず反映する。",
-        "Auto-Growing Identity なので、最近の /lab の種メモ・採用文・検証メモ・反応ログから、その人の Being を逆算する。",
-        "外部サイトの中身を読んだ前提では書かない。与えられた材料から推定できることだけを書く。",
-      ].join("\n"),
-      prompt: [
-        "以下の材料から、このユーザーの起業家としてのアイデンティティ（Identity）を分析してください。",
-        "",
-        controls.dnaChoices.length > 0 ? `二択DNA:\n${controls.dnaChoices.map((line) => `- ${line}`).join("\n")}` : "二択DNA: 指定なし",
-        "",
-        controls.antiPersona.length > 0
-          ? `Anti-Persona:\n${controls.antiPersona.map((line) => `- ${line}`).join("\n")}`
-          : "Anti-Persona: 指定なし",
-        "",
-        sourceLines.length > 0 ? `行動ログ / 反応ログ:\n${sourceLines.map((line) => `- ${line}`).join("\n")}` : "行動ログ / 反応ログ: なし",
-      ].join("\n"),
-      temperature: 0.4,
-    });
+    const { object } = await withGeminiQuotaAwareRetry(() =>
+      generateObject({
+        model: google("gemini-2.5-flash"),
+        schema: personaSchema,
+        maxRetries: 0,
+        system: [
+          "あなたは起業家の思想・強み・価値観を整理する日本語ストラテジストです。",
+          "入力された断片から、その人がどんな事業を育てやすいかをユーザーに説明可能な形で整理してください。",
+          "keywords は5個ちょうど。次の5軸を1つずつ表すこと: 問題意識 / 強み / 価値観 / 顧客への向き合い方 / 発信スタンス。",
+          "各キーワードは日本語で2〜10文字程度、抽象語だけに逃げず、本人らしさが伝わる言葉にする。",
+          "summary は、その人がどんな思想で事業の種を選び、どんな市場への向き合い方をしそうかを日本語で要約する。",
+          "evidence は、なぜそう判断したかをユーザーが納得できる説明文にする。",
+          "stylePrompt は、生成時にそのまま使える『起業家スタンスメモ』として一文に整える。",
+          "二択DNAは、その人の価値観の土台として強く反映する。",
+          "Anti-Persona は『こうはなりたくない』『こうは語りたくない』という境界線として扱い、summary と stylePrompt に必ず反映する。",
+          "Auto-Growing Identity なので、最近の /lab の種メモ・採用文・検証メモ・反応ログから、その人の Being を逆算する。",
+          "外部サイトの中身を読んだ前提では書かない。与えられた材料から推定できることだけを書く。",
+        ].join("\n"),
+        prompt: [
+          "以下の材料から、このユーザーの起業家としてのアイデンティティ（Identity）を分析してください。",
+          "",
+          controls.dnaChoices.length > 0 ? `二択DNA:\n${controls.dnaChoices.map((line) => `- ${line}`).join("\n")}` : "二択DNA: 指定なし",
+          "",
+          controls.antiPersona.length > 0
+            ? `Anti-Persona:\n${controls.antiPersona.map((line) => `- ${line}`).join("\n")}`
+            : "Anti-Persona: 指定なし",
+          "",
+          sourceLines.length > 0 ? `行動ログ / 反応ログ:\n${sourceLines.map((line) => `- ${line}`).join("\n")}` : "行動ログ / 反応ログ: なし",
+        ].join("\n"),
+        temperature: 0.4,
+      }),
+    );
 
     const nextSettings = await saveGhostSettings(
       {
@@ -261,7 +269,8 @@ export async function POST(request: Request) {
 
     return Response.json({ settings: nextSettings, identity: nextIdentity });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Identity の分析に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const message = formatAiGatewayErrorForClient(error);
+    const status = getAiGatewayErrorHttpStatus(error);
+    return Response.json({ error: message }, { status: status === 429 ? 429 : 500 });
   }
 }
