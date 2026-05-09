@@ -3,15 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Activity, ChevronDown, Compass, Flame, History, Snowflake, Sparkles } from "lucide-react";
+import { Activity, Flame, History, Snowflake, Tags } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  appendIdentityFieldBufferEntry as appendIdentityFieldBufferEntryRemote,
   DATA_SYNC_EVENT,
   ensureDemoWorkspace,
+  fetchIdentityFieldBufferSeriesSummary,
   fetchArchiveOverview,
   patchSeriesItemRecord,
   seedArchiveSampleData,
@@ -19,17 +21,16 @@ import {
 import { EMOTION_LABELS, type EmotionTone } from "@/lib/emotions";
 import {
   appendIdentityFieldLog,
-  IDENTITY_FIELD_BUFFER_ALERT_HOT,
-  IDENTITY_FIELD_BUFFER_ALERT_TOTAL,
   readFirstActionDone,
   readIdentityFieldLog,
   readRoadmapChecklist,
   readRoadmapDeployContext,
   splitStoredPlanBody,
-  summarizeIdentityFieldBuffer,
+  summarizeIdentityFieldBufferBySeries,
   writeRoadmapChecklist,
   type RoadmapDeployContextV1,
 } from "@/lib/roadmap-deploy";
+import { deriveRoadmapSeriesStatus } from "@/lib/roadmap-series-status";
 import { sortSeriesLikeItemsBySlotOrder } from "@/lib/series";
 import type { ArchiveOverview, GenerationSeriesRecord, QuickFeedback } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -48,63 +49,6 @@ function isSeriesRecord(entry: { generationMode: string }): entry is GenerationS
   return entry.generationMode === "series";
 }
 
-/** Lab デプロイ時の共鳴％をベースに、検証入力（反応・メモ・数値）だけで「実行後のズレ」を近似する（0–100）。チェックリスト進捗は含めない */
-function computeRealtimeAlignmentPercent(params: {
-  baselinePercent: number | null;
-  series: GenerationSeriesRecord;
-}): number {
-  const baseRaw =
-    typeof params.baselinePercent === "number" && !Number.isNaN(params.baselinePercent)
-      ? params.baselinePercent
-      : null;
-  const base = baseRaw != null ? Math.min(100, Math.max(0, Math.round(baseRaw))) : 52;
-
-  let execution = 0;
-  for (const item of params.series.items) {
-    if (item.quickFeedback === "hot") execution += 6;
-    if (item.quickFeedback === "cold") execution -= 8;
-    if (item.memo?.trim()) execution += 3;
-    if (item.likes != null && item.likes > 0) execution += 2;
-  }
-  execution = Math.min(25, Math.max(-22, execution));
-
-  return Math.min(100, Math.max(8, Math.round(base + execution)));
-}
-
-const CHECKLIST_SLOT_TOTAL = 5;
-
-/** 市場の反応・メモ・数値だけを「知見」としてカウント（チェック完了は進捗側の指標と分離） */
-function countInsightsCollected(params: { series: GenerationSeriesRecord }): number {
-  let n = 0;
-  for (const item of params.series.items) {
-    if (item.quickFeedback != null) n += 1;
-    if (item.memo?.trim()) n += 1;
-    if (item.likes != null && item.likes > 0) n += 1;
-  }
-  return n;
-}
-
-function checklistDoneCount(checklist: boolean[]): number {
-  return checklist.filter(Boolean).length;
-}
-
-function operationProgressPercent(checklist: boolean[]): number {
-  const done = checklistDoneCount(checklist);
-  return Math.round((done / CHECKLIST_SLOT_TOTAL) * 100);
-}
-
-function evolutionHint(insights: ArchiveOverview["insights"], seriesEmotion: EmotionTone): string | null {
-  const empathy = insights.emotionBreakdown.find((e) => e.emotion === "empathy");
-  if (empathy && empathy.usageCount >= 2 && empathy.hotRate < 25 && seriesEmotion === "empathy") {
-    return "直近ログでは「共感」軸の🔥率が伸び悩みです。Identity のトーンと Lab の武器の組み合わせを再調整することを推奨します。";
-  }
-  const total = insights.totalSingles + insights.totalSeries;
-  if (total >= 5 && insights.totalHot <= 1) {
-    return `${insights.bestPatternSummary.slice(0, 140)}${insights.bestPatternSummary.length > 140 ? "…" : ""}`;
-  }
-  return null;
-}
-
 export function RoadmapWorkspace() {
   const searchParams = useSearchParams();
   const [overview, setOverview] = useState<ArchiveOverview | null>(null);
@@ -112,33 +56,47 @@ export function RoadmapWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [deployCtx, setDeployCtx] = useState<RoadmapDeployContextV1 | null>(null);
   const [checklist, setChecklist] = useState<boolean[]>([false, false, false, false, false]);
-  const [bodyOpen, setBodyOpen] = useState(false);
   const [quickFeedback, setQuickFeedback] = useState<QuickFeedback>(null);
-  const [likesInput, setLikesInput] = useState("");
   const [memoInput, setMemoInput] = useState("");
   const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
+  const [feedbackGuide, setFeedbackGuide] = useState<string | null>(null);
   const [sampleSeedBusy, setSampleSeedBusy] = useState(false);
   const [identityFieldBuffer, setIdentityFieldBuffer] = useState<ReturnType<typeof readIdentityFieldLog>>([]);
+  const [serverPendingBySeries, setServerPendingBySeries] = useState<Record<string, number>>({});
   const autoRoadmapSampleAttemptedRef = useRef(false);
 
   const refreshIdentityFieldBuffer = useCallback(() => {
     setIdentityFieldBuffer(readIdentityFieldLog());
   }, []);
 
+  const refreshServerPending = useCallback(async () => {
+    try {
+      const rows = await fetchIdentityFieldBufferSeriesSummary();
+      const next: Record<string, number> = {};
+      for (const row of rows) next[row.seriesId] = row.pendingCount;
+      setServerPendingBySeries(next);
+    } catch {
+      // ignore: keep current snapshot when summary API fails
+    }
+  }, []);
+
   useEffect(() => {
     refreshIdentityFieldBuffer();
+    void refreshServerPending();
     if (typeof window === "undefined") return;
-    window.addEventListener(DATA_SYNC_EVENT, refreshIdentityFieldBuffer);
-    return () => window.removeEventListener(DATA_SYNC_EVENT, refreshIdentityFieldBuffer);
-  }, [refreshIdentityFieldBuffer]);
+    const onSync = () => {
+      refreshIdentityFieldBuffer();
+      void refreshServerPending();
+    };
+    window.addEventListener(DATA_SYNC_EVENT, onSync);
+    return () => window.removeEventListener(DATA_SYNC_EVENT, onSync);
+  }, [refreshIdentityFieldBuffer, refreshServerPending]);
 
-  const identityBufferSummary = useMemo(
-    () => summarizeIdentityFieldBuffer(identityFieldBuffer),
+  const identityBufferBySeries = useMemo(
+    () => summarizeIdentityFieldBufferBySeries(identityFieldBuffer),
     [identityFieldBuffer],
   );
-  const showIdentityEvolutionAlert =
-    identityBufferSummary.total >= IDENTITY_FIELD_BUFFER_ALERT_TOTAL ||
-    identityBufferSummary.hot >= IDENTITY_FIELD_BUFFER_ALERT_HOT;
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -232,25 +190,10 @@ export function RoadmapWorkspace() {
   useEffect(() => {
     if (!anchorItem) return;
     setQuickFeedback(anchorItem.quickFeedback ?? null);
-    setLikesInput(anchorItem.likes != null ? String(anchorItem.likes) : "");
     setMemoInput(anchorItem.memo ?? "");
-  }, [anchorItem?.id, anchorItem?.quickFeedback, anchorItem?.likes, anchorItem?.memo]);
-
-  const realtimeAlignmentPercent = useMemo(() => {
-    if (!activeSeries) return 52;
-    return computeRealtimeAlignmentPercent({
-      baselinePercent: ctxEffective?.identityResonancePercent ?? null,
-      series: activeSeries,
-    });
-  }, [activeSeries, ctxEffective]);
-
-  const insightsCollectedCount = useMemo(() => {
-    if (!activeSeries) return 0;
-    return countInsightsCollected({ series: activeSeries });
-  }, [activeSeries]);
-
-  const checklistProgressDone = useMemo(() => checklistDoneCount(checklist), [checklist]);
-  const checklistProgressPercent = useMemo(() => operationProgressPercent(checklist), [checklist]);
+    setFeedbackSent(false);
+    setFeedbackGuide(null);
+  }, [anchorItem?.id, anchorItem?.quickFeedback, anchorItem?.memo]);
 
   const missionFinalGoal = ctxEffective?.finalGoal ?? "次の検証で、市場から確かな反応を取りにいく。";
   const missionFirst = ctxEffective?.firstAction ?? "まずは最小の投稿またはDMで仮説を一文に落とす。";
@@ -260,8 +203,17 @@ export function RoadmapWorkspace() {
     seriesItemsTimeline.forEach((item) => item.hashtags.forEach((t) => set.add(t)));
     return [...set];
   }, [seriesItemsTimeline]);
-
-  const evolution = overview?.insights && activeSeries ? evolutionHint(overview.insights, activeSeries.emotion) : null;
+  const compactTagBadges = useMemo(() => {
+    const badges: string[] = [];
+    if (ctxEffective?.usagePurposeLabel) badges.push(`${ctxEffective.usagePurposeLabel}`);
+    if (ctxEffective?.weaponLabel) badges.push(`${ctxEffective.weaponLabel}`);
+    if (badges.length < 2) badges.push(EMOTION_LABELS[activeSeries?.emotion ?? "empathy"]);
+    return badges.slice(0, 2);
+  }, [activeSeries?.emotion, ctxEffective?.usagePurposeLabel, ctxEffective?.weaponLabel]);
+  const hiddenKeywordTagCount = useMemo(() => {
+    const count = (activeSeries?.memoryTags?.length ?? 0) + allHashtags.length;
+    return Math.max(0, count);
+  }, [activeSeries?.memoryTags?.length, allHashtags.length]);
 
   const archiveRows = useMemo(() => {
     return [...seriesEntries].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -280,24 +232,36 @@ export function RoadmapWorkspace() {
 
   const saveFeedback = async () => {
     if (!anchorItem) return;
+    if (quickFeedback == null) {
+      setFeedbackGuide("今の感触を選んでください。");
+      return;
+    }
     setFeedbackSaving(true);
     setError(null);
-    const parsedLikes = likesInput.trim() === "" ? null : Number.parseInt(likesInput, 10);
-    const likes = parsedLikes == null || Number.isNaN(parsedLikes) ? null : parsedLikes;
+    setFeedbackGuide(null);
     const memo = memoInput.trim() === "" ? null : memoInput.trim();
     try {
-      await patchSeriesItemRecord(anchorItem.id, { quickFeedback, likes, memo });
+      await patchSeriesItemRecord(anchorItem.id, { quickFeedback, memo });
       if (activeSeries) {
         appendIdentityFieldLog({
           at: new Date().toISOString(),
           seriesId: activeSeries.id,
           itemId: anchorItem.id,
           quickFeedback,
-          likes,
+          likes: null,
+          memo,
+        });
+        await appendIdentityFieldBufferEntryRemote({
+          seriesId: activeSeries.id,
+          itemId: anchorItem.id,
+          quickFeedback,
+          likes: null,
           memo,
         });
       }
+      await refreshServerPending();
       await refresh();
+      setFeedbackSent(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存に失敗しました");
     } finally {
@@ -307,13 +271,13 @@ export function RoadmapWorkspace() {
 
   if (loading && overview == null) {
     return (
-      <div className="mx-auto max-w-6xl px-4 py-16 text-center text-muted-foreground md:px-6">読み込み中…</div>
+      <div className="mx-auto w-full max-w-[2200px] px-4 py-16 text-center text-muted-foreground md:px-6 xl:px-8 2xl:px-10">読み込み中…</div>
     );
   }
 
   if (error && overview == null) {
     return (
-      <div className="mx-auto max-w-6xl px-4 py-16 text-center text-destructive md:px-6">{error}</div>
+      <div className="mx-auto w-full max-w-[2200px] px-4 py-16 text-center text-destructive md:px-6 xl:px-8 2xl:px-10">{error}</div>
     );
   }
 
@@ -329,30 +293,15 @@ export function RoadmapWorkspace() {
       </div>
     ) : null;
 
-  const mentorRailPinned =
-    mentorCards != null ? (
-      <aside
-        className={cn(
-          "pointer-events-auto z-30 hidden max-h-[calc(100vh-7rem)] w-64 shrink-0 overflow-y-auto rounded-2xl border bg-background/95 p-3 shadow-lg backdrop-blur-md xl:fixed xl:right-6 xl:top-24 xl:block",
-        )}
-      >
-        {mentorCards}
-      </aside>
-    ) : null;
-
   return (
-    <div className="relative mx-auto max-w-6xl space-y-8 px-4 py-8 pb-28 md:px-6 xl:max-w-[min(100vw-18rem,72rem)] xl:pr-72">
+    <div className="relative mx-auto w-full max-w-[2200px] space-y-6 px-4 py-8 pb-28 md:px-6 xl:flex xl:h-[calc(100vh-4rem)] xl:flex-col xl:overflow-hidden xl:px-8 xl:pb-6 2xl:px-10">
       <header className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="rounded-full text-[10px]">
-            Strategic Integrity
-          </Badge>
-          <Compass className="size-4 text-muted-foreground" aria-hidden />
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Roadmap</h1>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            過去の反省を参照しながら、現在の作戦を実行し、検証結果を記録します。
+          </p>
         </div>
-        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Roadmap</h1>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          戦略の純度（Identity との整合）を確認しながら、プロトコルを実行し、検証結果を記録します。
-        </p>
       </header>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -399,110 +348,28 @@ export function RoadmapWorkspace() {
         </Card>
       ) : (
         <>
-          {mentorRailPinned}
-          {/* 1. Strategic Integrity HUD */}
-          <Card className="overflow-hidden border-violet-200/50 bg-linear-to-br from-violet-50/80 via-background to-fuchsia-50/40 dark:border-violet-900/40 dark:from-violet-950/25 dark:via-background dark:to-fuchsia-950/15">
-            <CardHeader className="space-y-4 pb-2">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Strategic Integrity</p>
-                <p className="mt-0.5 text-lg font-semibold text-foreground">戦略の純度</p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  このアクションが、自分の Identity（思想）をどれだけ体現できているかを見るダッシュボードです。
-                </p>
-              </div>
+          {/* 1. Current guidance strip */}
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-background/85 px-3 py-2 text-sm">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Mission</span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-foreground" title={missionFinalGoal}>
+              {missionFinalGoal}
+            </span>
+            {compactTagBadges.map((badge) => (
+              <Badge key={badge} variant="secondary" className="rounded-full whitespace-nowrap text-[10px]">
+                {badge}
+              </Badge>
+            ))}
+            {hiddenKeywordTagCount > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/30 px-2 py-0.5 text-[10px] text-muted-foreground">
+                <Tags className="size-3" />
+                タグ {hiddenKeywordTagCount}件
+              </span>
+            ) : null}
+          </div>
 
-              <div className="rounded-2xl border border-amber-200/70 bg-amber-50/90 px-4 py-3 dark:border-amber-900/45 dark:bg-amber-950/25">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:text-amber-100">
-                  Identity DNA — 今回守るべきスタンス
-                </p>
-                <p className="mt-1.5 text-sm font-semibold leading-relaxed wrap-break-word text-amber-950 dark:text-amber-50">
-                  {activeSeries.ghostWhisper?.trim() ? (
-                    activeSeries.ghostWhisper.trim()
-                  ) : (
-                    <span className="font-normal text-muted-foreground">
-                      Lab で Identity Filter ON の連載を生成すると、Ghost Whisper がここに表示されます。
-                    </span>
-                  )}
-                </p>
-              </div>
-
-              <div className="grid gap-6 sm:grid-cols-3 sm:gap-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Identity 共鳴度（Alignment）
-                  </p>
-                  <p className="mt-2 text-4xl font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-200">
-                    {realtimeAlignmentPercent}
-                    <span className="text-lg font-semibold">%</span>
-                  </p>
-                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                    Lab デプロイ時の共鳴を起点に、検証フィードバック（反応・メモ・数値）で更新されます。チェックリストの完了数は含みません。
-                  </p>
-                </div>
-                <div className="min-w-0 border-t border-border/20 pt-4 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">作戦の進捗</p>
-                  <p className="mt-2 text-4xl font-bold tabular-nums tracking-tight text-teal-700 dark:text-teal-200">
-                    {checklistProgressPercent}
-                    <span className="text-lg font-semibold">%</span>
-                  </p>
-                  <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-                    {checklistProgressDone}/{CHECKLIST_SLOT_TOTAL} チェック完了
-                  </p>
-                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                    First Action・各 STEP・最終目標のチェックのみ。実行の足取りとしての進捗率です。
-                  </p>
-                </div>
-                <div className="min-w-0 border-t border-border/20 pt-4 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">蓄積された知見</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Insights</p>
-                  <p className="mt-2 text-3xl font-bold tabular-nums text-fuchsia-700 dark:text-fuchsia-200">{insightsCollectedCount}</p>
-                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                    反応記録・検証メモ・数値入力の件数です（市場からの手がかりのストック。Identity バッファへ送る内容の材料になります）。
-                  </p>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 border-t border-border/20 pt-4">
-              <div>
-                <p className="text-xs font-semibold tracking-wide text-muted-foreground">現在のミッション（Final Goal）</p>
-                <p className="mt-2 text-lg font-medium leading-relaxed text-foreground">{missionFinalGoal}</p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold tracking-wide text-muted-foreground">作戦の前提（タグ）</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {ctxEffective ? (
-                    <>
-                      <Badge variant="secondary" className="rounded-full">
-                        活用: {ctxEffective.usagePurposeLabel}
-                      </Badge>
-                      {ctxEffective.weaponLabel ? (
-                        <Badge variant="secondary" className="rounded-full">
-                          武器: {ctxEffective.weaponLabel}
-                        </Badge>
-                      ) : null}
-                    </>
-                  ) : null}
-                  <Badge variant="outline" className="rounded-full">
-                    {EMOTION_LABELS[activeSeries.emotion]}
-                  </Badge>
-                  {(activeSeries.memoryTags ?? []).map((tag) => (
-                    <Badge key={tag} variant="outline" className="rounded-full text-[11px]">
-                      {tag.startsWith("#") ? tag : `#${tag}`}
-                    </Badge>
-                  ))}
-                  {allHashtags.slice(0, 12).map((tag) => (
-                    <Badge key={`h-${tag}`} variant="outline" className="rounded-full text-[11px]">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
-            {/* 2. Active protocol */}
-            <div className="space-y-6">
+          <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,0.68fr)_minmax(0,0.32fr)] xl:overflow-hidden">
+            {/* Left: active protocol */}
+            <div className="space-y-6 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
               <Card>
                 <CardHeader>
                   <div className="flex items-center gap-2">
@@ -512,24 +379,29 @@ export function RoadmapWorkspace() {
                   <p className="text-xs text-muted-foreground">{activeSeries.title}</p>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <label className="flex cursor-pointer gap-3 rounded-2xl border-2 border-violet-300/60 bg-violet-50/50 p-4 dark:border-violet-700/50 dark:bg-violet-950/20">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(checklist[0])}
-                      onChange={(e) => setChecklistAt(0, e.target.checked)}
-                      className="mt-1 size-4 shrink-0 accent-violet-600"
-                    />
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-200">
-                        First Action（今日の一歩）
-                      </p>
-                      <p className="mt-1 text-sm font-medium leading-relaxed text-foreground">{missionFirst}</p>
-                    </div>
-                  </label>
-
                   <div>
                     <p className="text-xs font-semibold tracking-wide text-muted-foreground">アクションツリー</p>
                     <ol className="mt-3 space-y-3 border-l-2 border-dashed border-border/60 pl-4">
+                      <li className="relative">
+                        <span className="absolute -left-[21px] top-1.5 size-2.5 rounded-full bg-violet-500 ring-4 ring-background" />
+                        <label className="flex cursor-pointer gap-3 rounded-xl border-2 border-violet-300/60 bg-violet-50/50 px-3 py-2 dark:border-violet-700/50 dark:bg-violet-950/20">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(checklist[0])}
+                            onChange={(e) => setChecklistAt(0, e.target.checked)}
+                            className="mt-1 size-4 shrink-0 accent-violet-600"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge className="rounded-full bg-violet-600 text-[10px] text-white">START</Badge>
+                              <span className="text-xs font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-200">
+                                First Action（今日の一歩）
+                              </span>
+                            </div>
+                            <p className="mt-2 text-sm font-medium leading-relaxed text-foreground">{missionFirst}</p>
+                          </div>
+                        </label>
+                      </li>
                       {seriesItemsTimeline.map((item, index) => {
                         const { narrative, immediate } = splitStoredPlanBody(item.body);
                         const verifiedHot = Boolean(item.quickFeedback === "hot");
@@ -555,11 +427,21 @@ export function RoadmapWorkspace() {
                                     <Badge className="rounded-full bg-emerald-600 text-[10px] text-white">検証🔥</Badge>
                                   ) : null}
                                 </div>
-                                <p className="mt-2 text-sm leading-relaxed text-foreground">{narrative}</p>
                                 {immediate ? (
-                                  <p className="mt-2 border-l-2 border-violet-400/50 pl-2 text-xs font-medium text-violet-900 dark:text-violet-100">
-                                    すぐやること: {immediate}
+                                  <p className="mt-2 border-l-2 border-violet-400/50 pl-2 text-sm text-foreground dark:text-foreground">
+                                    <span className="font-semibold text-violet-800 dark:text-violet-300">すぐやること:</span>{" "}
+                                    <span>{immediate}</span>
                                   </p>
+                                ) : (
+                                  <p className="mt-2 text-sm text-muted-foreground">すぐやること: （未設定）</p>
+                                )}
+                                {narrative ? (
+                                  <details className="mt-2">
+                                    <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                                      意図・背景を開く
+                                    </summary>
+                                    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{narrative}</p>
+                                  </details>
                                 ) : null}
                               </div>
                             </label>
@@ -584,203 +466,198 @@ export function RoadmapWorkspace() {
                     </ol>
                   </div>
 
-                  {mentorCards ? <div className="xl:hidden">{mentorCards}</div> : null}
+                  {(mentorCards || ctxEffective?.dnaAlignmentReason || ctxEffective?.protocolLines?.length) ? (
+                    <section className="space-y-3 rounded-xl border border-border/40 bg-muted/20 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        作戦の裏側（Reference）
+                      </p>
 
-                  {ctxEffective?.dnaAlignmentReason ? (
-                    <div className="rounded-xl border border-border/40 bg-muted/15 px-3 py-2 text-xs text-muted-foreground">
-                      <span className="font-semibold text-foreground">Lab 共鳴メモ: </span>
-                      {ctxEffective.dnaAlignmentReason}
-                    </div>
-                  ) : null}
+                      {mentorCards ? <div className="xl:hidden">{mentorCards}</div> : null}
 
-                  <button
-                    type="button"
-                    onClick={() => setBodyOpen((o) => !o)}
-                    className="flex w-full items-center justify-between rounded-xl border bg-muted/20 px-3 py-2 text-left text-sm font-medium"
-                  >
-                    作戦詳細（生成本文）
-                    <ChevronDown className={cn("size-4 transition-transform", bodyOpen && "rotate-180")} />
-                  </button>
-                  {bodyOpen ? (
-                    <div className="space-y-3 rounded-xl border border-dashed bg-background/80 p-3">
-                      {seriesItemsTimeline.map((item) => {
-                        const { narrative } = splitStoredPlanBody(item.body);
-                        return (
-                          <div key={`acc-${item.id}`}>
-                            <p className="text-[10px] font-semibold text-muted-foreground">{item.slotLabel}</p>
-                            <p className="mt-1 text-sm leading-relaxed text-foreground/90">{narrative}</p>
+                      {ctxEffective?.dnaAlignmentReason ? (
+                        <details>
+                          <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                            Lab 共鳴メモ
+                          </summary>
+                          <div className="mt-2 rounded-lg border border-border/40 bg-background/80 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                            {ctxEffective.dnaAlignmentReason}
                           </div>
-                        );
-                      })}
-                      <div className="border-t pt-2">
-                        <p className="text-[10px] font-semibold text-muted-foreground">種メモ（Lab 入力）</p>
-                        <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{activeSeries.draft}</p>
-                      </div>
-                    </div>
-                  ) : null}
+                        </details>
+                      ) : null}
 
-                  {ctxEffective?.protocolLines?.length ? (
-                    <div>
-                      <p className="text-xs font-semibold tracking-wide text-muted-foreground">ハット視点（Lab モーダル）</p>
-                      <ul className="mt-2 space-y-2">
-                        {ctxEffective.protocolLines.map((line, i) => (
-                          <li key={i} className="rounded-lg border bg-background/70 px-3 py-2 text-xs leading-relaxed">
-                            <span className="font-semibold text-muted-foreground">
-                              {line.short}（{line.hat}）
-                            </span>
-                            ：{line.line}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                      <details>
+                        <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                          作戦詳細（生成本文）
+                        </summary>
+                        <div className="mt-2 space-y-3 rounded-lg border border-dashed bg-background/80 p-3">
+                          {seriesItemsTimeline.map((item) => {
+                            const { narrative } = splitStoredPlanBody(item.body);
+                            return (
+                              <div key={`acc-${item.id}`}>
+                                <p className="text-[10px] font-semibold text-muted-foreground">{item.slotLabel}</p>
+                                <p className="mt-1 text-sm leading-relaxed text-foreground/90">{narrative}</p>
+                              </div>
+                            );
+                          })}
+                          <div className="border-t pt-2">
+                            <p className="text-[10px] font-semibold text-muted-foreground">種メモ（Lab 入力）</p>
+                            <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{activeSeries.draft}</p>
+                          </div>
+                        </div>
+                      </details>
+
+                      {ctxEffective?.protocolLines?.length ? (
+                        <details>
+                          <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                            ハット視点（Lab モーダル）
+                          </summary>
+                          <ul className="mt-2 space-y-2">
+                            {ctxEffective.protocolLines.map((line, i) => (
+                              <li key={i} className="rounded-lg border bg-background/70 px-3 py-2 text-xs leading-relaxed">
+                                <span className="font-semibold text-muted-foreground">
+                                  {line.short}（{line.hat}）
+                                </span>
+                                ：{line.line}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </section>
                   ) : null}
                 </CardContent>
               </Card>
             </div>
 
-            {/* 3. Feedback */}
-            <aside className="space-y-4 lg:sticky lg:top-24">
+            {/* Right: insight hub */}
+            <aside className="space-y-4 xl:min-h-0 xl:overflow-y-auto xl:pl-1">
               <Card>
                 <CardHeader>
                   <p className="text-sm font-semibold">検証フィードバック</p>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    STEP 1 実行直後の事実を残します。ここで書いた「想定とのズレ」は送信時に Identity 用バッファへ積まれ、/identity で DNA を直すときの一次資料になります。
-                  </p>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={quickFeedback === "hot" ? "default" : "outline"}
-                      className={quickFeedback === "hot" ? "bg-orange-500 hover:bg-orange-600" : ""}
-                      disabled={feedbackSaving}
-                      onClick={() => setQuickFeedback(quickFeedback === "hot" ? null : "hot")}
-                    >
-                      <Flame className="mr-1 size-3.5" />
-                      反応あり
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={quickFeedback === "cold" ? "default" : "outline"}
-                      disabled={feedbackSaving}
-                      onClick={() => setQuickFeedback(quickFeedback === "cold" ? null : "cold")}
-                    >
-                      <Snowflake className="mr-1 size-3.5" />
-                      刺さらず
-                    </Button>
+                <CardContent className={cn("space-y-4 transition-opacity", feedbackSent && "opacity-80")}>
+                  {feedbackSent ? (
+                    <div className="rounded-lg border border-emerald-300/60 bg-emerald-50/80 px-3 py-2 text-xs font-medium text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-950/20 dark:text-emerald-200">
+                      ✅ 送信済み
+                    </div>
+                  ) : null}
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-foreground">今の感触</p>
+                    <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1">
+                      <button
+                        type="button"
+                        className={cn(
+                          "inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium transition-colors",
+                          quickFeedback === "hot"
+                            ? "bg-violet-600 text-white shadow-sm"
+                            : "text-muted-foreground hover:bg-background/70",
+                        )}
+                        disabled={feedbackSaving}
+                        onClick={() => {
+                          setQuickFeedback("hot");
+                          setFeedbackSent(false);
+                          setFeedbackGuide(null);
+                        }}
+                      >
+                        <Flame className="size-3.5" />
+                        手応えあり
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium transition-colors",
+                          quickFeedback === "cold"
+                            ? "bg-violet-600 text-white shadow-sm"
+                            : "text-muted-foreground hover:bg-background/70",
+                        )}
+                        disabled={feedbackSaving}
+                        onClick={() => {
+                          setQuickFeedback("cold");
+                          setFeedbackSent(false);
+                          setFeedbackGuide(null);
+                        }}
+                      >
+                        <Snowflake className="size-3.5" />
+                        何か違う
+                      </button>
+                    </div>
                   </div>
                   <label className="block space-y-1.5">
                     <span className="text-xs font-semibold text-foreground">想定と何が違ったか（Identity へ還流）</span>
-                    <span className="block text-[11px] leading-relaxed text-muted-foreground">
-                      Lab で立てた仮説・トーンと、実際の反応や自分の違和感の差を文章で残してください。空でも送信できますが、DNA 調整にはここが効きます。
-                    </span>
                     <Textarea
                       value={memoInput}
-                      onChange={(e) => setMemoInput(e.target.value)}
+                      onChange={(e) => {
+                        setMemoInput(e.target.value);
+                        setFeedbackSent(false);
+                      }}
                       className="min-h-[120px] border-border"
-                      placeholder="例: 想定では共感コメントが来るはずだったが、保存ばかり増えた。Ghost の一文が強すぎた可能性がある。"
+                      placeholder="例: 避けるべき言い回しが刺さっていない。次回は「不安を煽る型」を外し、当事者の痛みを具体化する。"
                     />
                   </label>
-                  <label className="block space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">任意：いいね数などの数値</span>
-                    <input
-                      type="number"
-                      min={0}
-                      inputMode="numeric"
-                      value={likesInput}
-                      onChange={(e) => setLikesInput(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
-                      placeholder="例: 12（補助指標）"
-                    />
-                  </label>
-                  <Button type="button" className="w-full" disabled={feedbackSaving || !anchorItem} onClick={() => void saveFeedback()}>
-                    {feedbackSaving ? "送信中…" : "結果を Identity バッファへ送信"}
-                  </Button>
-                  <Link
-                    href="/identity"
-                    className={cn(buttonVariants({ variant: "default", size: "sm" }), "inline-flex w-full justify-center bg-violet-600 hover:bg-violet-500")}
+                  {feedbackGuide ? <p className="text-xs text-amber-600">{feedbackGuide}</p> : null}
+                  <Button
+                    type="button"
+                    className="w-full bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                    disabled={feedbackSaving || !anchorItem || feedbackSent}
+                    onClick={() => void saveFeedback()}
                   >
-                    Identity でズレを取り込む
-                  </Link>
-                  <p className="text-center text-[11px] text-muted-foreground">
-                    数値だけでなく、上のメモが次の生成に還流しやすくなります。
-                  </p>
+                    {feedbackSaving ? "送信中…" : feedbackSent ? "送信済み" : "結果をバッファへ送信"}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <History className="size-4" />
+                    <p className="text-sm font-semibold">進化の軌跡</p>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <ul className="space-y-2">
+                    {archiveRows.map((row) => {
+                      const hot = row.items.filter((i) => i.quickFeedback === "hot").length;
+                    const status = deriveRoadmapSeriesStatus(row, activeSeries?.id ?? null);
+                      const pendingIdentityCount =
+                        serverPendingBySeries[row.id] ?? identityBufferBySeries[row.id]?.total ?? 0;
+                    return (
+                        <li key={`right-${row.id}`}>
+                          <Link
+                            href={`/roadmap?series=${row.id}`}
+                            className={cn(
+                              "block rounded-xl border bg-card/60 p-3 transition-colors hover:bg-card",
+                              status === "active" && "ring-2 ring-violet-500/40",
+                            )}
+                          >
+                            <p className="truncate text-xs font-medium">{row.title}</p>
+                            <div className="mt-1 flex items-center gap-1">
+                              <Badge
+                                className={cn(
+                                  "rounded-full text-[9px] text-white",
+                                  status === "active" && "bg-violet-600",
+                                  status === "hot" && "bg-rose-500",
+                                  status === "archived" && "bg-zinc-500",
+                                )}
+                              >
+                                {status === "active" ? "ACTIVE" : status === "hot" ? "HOT" : "ARCHIVED"}
+                              </Badge>
+                              <Badge variant="outline" className="rounded-full text-[9px]">
+                                🔥 {hot}/{row.items.length}
+                              </Badge>
+                            </div>
+                            <p className="mt-1 text-[10px] text-muted-foreground">
+                              {pendingIdentityCount > 0 ? `DNA未反映 ${pendingIdentityCount}件` : "DNA還流: 完了"}
+                            </p>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </CardContent>
               </Card>
             </aside>
           </div>
 
-          {/* 4. Archive */}
-          <section className="space-y-4">
-            <div className="flex items-center gap-2">
-              <History className="size-4" />
-              <h2 className="text-lg font-semibold">進化の軌跡</h2>
-            </div>
-            {evolution ? (
-              <div className="flex gap-3 rounded-2xl border border-amber-200/70 bg-amber-50/80 p-4 text-sm dark:border-amber-900/50 dark:bg-amber-950/20">
-                <Sparkles className="mt-0.5 size-4 shrink-0 text-amber-600" />
-                <div>
-                  <p className="font-semibold text-amber-950 dark:text-amber-100">Evolution Protocol</p>
-                  <p className="mt-1 text-amber-950/85 dark:text-amber-50/85">{evolution}</p>
-                </div>
-              </div>
-            ) : null}
-            {showIdentityEvolutionAlert ? (
-              <div className="flex flex-col gap-3 rounded-2xl border border-violet-300/70 bg-violet-50/90 p-4 text-sm dark:border-violet-800/55 dark:bg-violet-950/25 sm:flex-row sm:items-start sm:gap-4">
-                <Sparkles className="mt-0.5 size-5 shrink-0 text-violet-600 dark:text-violet-300" aria-hidden />
-                <div className="min-w-0 flex-1 space-y-2">
-                  <p className="font-semibold text-violet-950 dark:text-violet-100">
-                    Evolution Protocol：Identityの再調整を推奨します
-                  </p>
-                  <p className="text-violet-950/90 dark:text-violet-50/85">
-                    Roadmap の検証フィードバックが Identity 用バッファに{" "}
-                    <span className="font-semibold tabular-nums">{identityBufferSummary.total}</span> 件溜まっています（🔥{" "}
-                    <span className="font-semibold tabular-nums">{identityBufferSummary.hot}</span>
-                    ・刺さらず <span className="font-semibold tabular-nums">{identityBufferSummary.cold}</span>
-                    {identityBufferSummary.withMemo > 0 ? (
-                      <>
-                        ・メモ付き <span className="font-semibold tabular-nums">{identityBufferSummary.withMemo}</span>
-                      </>
-                    ) : null}
-                    ）。/identity で DNA を見直すと、次の Lab 生成へ還流しやすくなります。
-                  </p>
-                  <Link
-                    href="/identity"
-                    className={cn(buttonVariants({ variant: "default", size: "sm" }), "w-fit bg-violet-600 hover:bg-violet-500")}
-                  >
-                    Identity を開く
-                  </Link>
-                </div>
-              </div>
-            ) : null}
-            <ul className="space-y-3">
-              {archiveRows.map((row) => {
-                const hot = row.items.filter((i) => i.quickFeedback === "hot").length;
-                const active = row.id === activeSeries.id;
-                return (
-                  <li key={row.id}>
-                    <Link
-                      href={`/roadmap?series=${row.id}`}
-                      className={cn(
-                        "block rounded-2xl border bg-card/60 p-4 transition-colors hover:bg-card",
-                        active && "ring-2 ring-violet-500/40",
-                      )}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="font-medium">{row.title}</p>
-                        <Badge variant="outline" className="rounded-full text-[10px]">
-                          🔥 {hot}/{row.items.length}
-                        </Badge>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">{formatDate(row.createdAt)}</p>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
         </>
       )}
     </div>

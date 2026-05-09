@@ -42,6 +42,8 @@ const VANILLA_IDENTITY_STUB: IdentityProfile = {
 };
 
 export const runtime = "edge";
+const FREE_DAILY_LIMIT = 3;
+const UNLIMITED_DAILY_SOFT_LIMIT = 100;
 
 const bodySchema = z.object({
   draft: z.string().min(1, "ネタが空です"),
@@ -172,10 +174,16 @@ export async function POST(request: Request) {
     const actor = await resolveRequestActor(request);
     const billing = await resolveBillingState(actor.userId);
     const dailyUsage = await getDailyGenerationUsage(actor.userId);
-    if (!billing.isUnlimited && dailyUsage >= 3) {
+    if (!billing.isUnlimited && dailyUsage >= FREE_DAILY_LIMIT) {
       return Response.json(
-        { error: "無料プランの本日の生成上限（3回）に達しました。プランをアップグレードしてください。" },
+        { error: `無料プランの本日の生成上限（${FREE_DAILY_LIMIT}回）に達しました。プランをアップグレードしてください。` },
         { status: 402 },
+      );
+    }
+    if (billing.isUnlimited && dailyUsage >= UNLIMITED_DAILY_SOFT_LIMIT) {
+      return Response.json(
+        { error: `本日の利用上限（${UNLIMITED_DAILY_SOFT_LIMIT}回）に達しました。明日以降に再度お試しください。` },
+        { status: 429 },
       );
     }
     const json = await request.json();

@@ -1,8 +1,6 @@
 /** 表示用の料金（円）。Stripe の Price ID と別途紐づけます。 */
 export const PLAN_MONTHLY_JPY = {
-  basic: 980,
-  creator: 2980,
-  pro: 5980,
+  unlimited: 2980,
 } as const;
 
 export const YEARLY_DISCOUNT = 0.2;

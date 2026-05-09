@@ -1,8 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { CheckCircle2, Sparkles } from "lucide-react";
 
@@ -10,8 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { createStripeCheckoutSession } from "@/lib/api-client";
+import { createStripeCheckoutSession, createStripePortalSession, fetchBillingStatus, type BillingStatus } from "@/lib/api-client";
 import { PLAN_MONTHLY_JPY, yearlyMonthlyEquivalentJpy, yearlyTotalJpy } from "@/lib/plan-pricing";
+import { useAuthSession } from "@/lib/use-auth-session";
 import { cn } from "@/lib/utils";
 
 const checkout = {
@@ -52,56 +54,40 @@ function CheckoutLink({
 type PlanRow = {
   name: string;
   subtitle: string;
-  planTier: "basic" | "creator" | "pro";
-  monthly: number;
+  monthly?: number;
+  generationQuota: string;
   dnaSlot: string;
   aiWallDepth: string;
   strategyRange: string;
-  vaultDepth: string;
+  dnaEvolution: string;
   tabooStrictness: string;
   target: string;
-  featured?: boolean;
 };
 
-const PLANS: PlanRow[] = [
-  {
-    name: "ベーシック",
-    subtitle: "Basic",
-    planTier: "basic",
-    monthly: PLAN_MONTHLY_JPY.basic,
-    dnaSlot: "1 Identity（1プロジェクト）",
-    aiWallDepth: "標準アドバイス（基礎的な壁打ち）",
-    strategyRange: "単発検証中心（素早い仮説テスト）",
-    vaultDepth: "直近10件までの反応分析",
-    tabooStrictness: "標準タブー検知",
-    target: "まず1つの事業仮説を育てたい人",
-  },
-  {
-    name: "クリエイター",
-    subtitle: "Creator",
-    planTier: "creator",
-    monthly: PLAN_MONTHLY_JPY.creator,
-    dnaSlot: "3 Identities（複数の顔を並行運用）",
-    aiWallDepth: "高解像度AI Wall（深掘り壁打ち）",
-    strategyRange: "単発 + 30日連動ロードマップ",
-    vaultDepth: "全履歴分析 + DNA自動還流（ROOTS同期優先）",
-    tabooStrictness: "厳密タブー検知（思想汚染を抑制）",
-    target: "複数テーマを継続検証する起業家",
-    featured: true,
-  },
-  {
-    name: "プロ",
-    subtitle: "Pro",
-    planTier: "pro",
-    monthly: PLAN_MONTHLY_JPY.pro,
-    dnaSlot: "Identity 無制限",
-    aiWallDepth: "最深解析 + 生存シミュレーション",
-    strategyRange: "全戦略テンプレ + 高度検証オペレーション",
-    vaultDepth: "全履歴分析 + 高優先ROOTS同期 + Prophecy深掘り",
-    tabooStrictness: "最厳格タブー検知（思想の一貫性を保護）",
-    target: "事業を複線で伸ばし続けるプロ向け",
-  },
-];
+const FREE_PLAN: PlanRow = {
+  name: "無料",
+  subtitle: "Free",
+  generationQuota: "毎日3回まで",
+  dnaSlot: "1 Identity（検証の入り口）",
+  aiWallDepth: "基本AIアドバイス（標準）",
+  strategyRange: "基本4フェーズ（探索・構築・研磨・伝達）",
+  dnaEvolution: "なし",
+  tabooStrictness: "標準ガード",
+  target: "まずは小さく検証を始めたい人",
+};
+
+const UNLIMITED_PLAN: PlanRow = {
+  name: "使い放題",
+  subtitle: "Unlimited",
+  monthly: PLAN_MONTHLY_JPY.unlimited,
+  generationQuota: "無制限（実用上限: 1日100回）",
+  dnaSlot: "Identity（DNA）スロット無制限",
+  aiWallDepth: "上位モデルで精密シミュレーション",
+  strategyRange: "全8フェーズ（検証・拡張・防衛・整列）を完全開放",
+  dnaEvolution: "ROOTS・バッファ同期を優先実行",
+  tabooStrictness: "高精度ガード + 防衛観点",
+  target: "Identity Labを事業の軍師として使い切る人",
+};
 
 function FeatureRow({ children }: { children: ReactNode }) {
   return (
@@ -113,30 +99,117 @@ function FeatureRow({ children }: { children: ReactNode }) {
 }
 
 export function PlansContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { user } = useAuthSession();
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
+  const [pendingPortal, setPendingPortal] = useState(false);
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
+  const [autoCheckoutHandled, setAutoCheckoutHandled] = useState(false);
+  const [selectedBilling, setSelectedBilling] = useState<Billing>("monthly");
 
-  const handleStartCheckout = async (planTier: "basic" | "creator" | "pro", billing: Billing) => {
-    const key = `${planTier}:${billing}`;
+  const planLabel = useMemo(() => {
+    const tier = billingStatus?.planTier ?? "free";
+    if (tier === "pro") return "Unlimited";
+    return "Free";
+  }, [billingStatus?.planTier]);
+
+  const cycleLabel = useMemo(() => {
+    if (billingStatus?.billingCycle === "yearly") return "年払い";
+    if (billingStatus?.billingCycle === "monthly") return "月払い";
+    return null;
+  }, [billingStatus?.billingCycle]);
+
+  useEffect(() => {
+    let active = true;
+    if (!user) {
+      setBillingStatus(null);
+      return;
+    }
+    void fetchBillingStatus()
+      .then((status) => {
+        if (active) setBillingStatus(status);
+      })
+      .catch(() => {
+        if (active) setBillingStatus(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  const handleStartCheckout = useCallback(async (billing: Billing) => {
+    if (!user) {
+      router.push(`/auth?next=${encodeURIComponent(`/plans?checkoutBilling=${billing}`)}`);
+      return;
+    }
+    const key = `pro:${billing}`;
     try {
       setPendingPlan(key);
       const result = await createStripeCheckoutSession({
-        planTier,
+        planTier: "pro",
         billingCycle: billing,
       });
       window.location.href = result.url;
     } catch (error) {
       const message = error instanceof Error ? error.message : "チェックアウトを開始できませんでした";
-      window.alert(message);
+      if (message.includes("ログイン")) {
+        router.push(`/auth?next=${encodeURIComponent(`/plans?checkoutBilling=${billing}`)}`);
+      } else {
+        window.alert(message);
+      }
     } finally {
       setPendingPlan(null);
     }
-  };
+  }, [router, user]);
+
+  const handleOpenPortal = useCallback(async () => {
+    if (!user) {
+      router.push(`/auth?next=${encodeURIComponent("/plans")}`);
+      return;
+    }
+    try {
+      setPendingPortal(true);
+      const result = await createStripePortalSession();
+      window.location.href = result.url;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "契約管理ページを開けませんでした";
+      window.alert(message);
+    } finally {
+      setPendingPortal(false);
+    }
+  }, [router, user]);
+
+  useEffect(() => {
+    if (!user || autoCheckoutHandled) return;
+    const checkoutBilling = searchParams.get("checkoutBilling");
+    if (checkoutBilling === "monthly" || checkoutBilling === "yearly") {
+      setAutoCheckoutHandled(true);
+      void handleStartCheckout(checkoutBilling);
+      return;
+    }
+    setAutoCheckoutHandled(true);
+  }, [autoCheckoutHandled, handleStartCheckout, searchParams, user]);
 
   return (
     <div className="relative min-h-dvh overflow-hidden">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,var(--tw-gradient-stops))] from-violet-200/40 via-background to-background dark:from-violet-950/35" />
 
       <main className="relative z-10 mx-auto max-w-6xl px-6 pb-28 pt-4 md:pb-24">
+        {user ? (
+          <section className="mx-auto mb-6 max-w-4xl rounded-2xl border bg-background/90 p-4 shadow-sm md:mb-8 md:p-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm text-muted-foreground">
+                現在のプラン: <span className="font-semibold text-foreground">{planLabel}</span>
+                {cycleLabel ? <span className="ml-1">（{cycleLabel}）</span> : null}
+              </p>
+              <Button variant="outline" onClick={() => void handleOpenPortal()} disabled={pendingPortal}>
+                {pendingPortal ? "ポータルへ接続中..." : "契約の管理（お支払い方法・解約）"}
+              </Button>
+            </div>
+          </section>
+        ) : null}
+
         {/* Hero */}
         <section className="mx-auto max-w-3xl space-y-4 pb-6 text-center md:pb-12">
           <Badge variant="secondary" className="text-xs">
@@ -144,57 +217,93 @@ export function PlansContent() {
             Persona DNA Plans
           </Badge>
           <h1 className="text-balance text-3xl font-bold tracking-tight md:text-5xl">
-            Persona DNA を、
+            あなたの Identity（自己）を、
             <br />
-            積み上がる事業資産にする。
+            持続可能な事業へと加速させる。
           </h1>
           <p className="text-lg text-muted-foreground md:text-xl">
-            生成回数ではなく、Identityの深さ・分析の解像度・市場反応の還流速度で選ぶプラン設計です。
+            Identity Lab は、あなたの情熱を事業に変えるためのツールです。全機能を使って、本気で成功を目指しましょう。
           </p>
         </section>
 
-        {/* Billing tabs + cards */}
-        <Tabs defaultValue="monthly" className="w-full">
-          <div className="mb-8 flex justify-center">
-            <TabsList className="h-11 p-1">
-              <TabsTrigger value="monthly" className="px-4">
+        <div className="mb-6 flex justify-center md:mb-8">
+          <Tabs
+            value={selectedBilling}
+            onValueChange={(value) => {
+              if (value === "monthly" || value === "yearly") setSelectedBilling(value);
+            }}
+            className="w-full max-w-sm"
+          >
+            <TabsList className="h-11 w-full p-1">
+              <TabsTrigger value="monthly" className="flex-1 px-4">
                 月払い
               </TabsTrigger>
-              <TabsTrigger value="yearly" className="px-4">
+              <TabsTrigger value="yearly" className="flex-1 px-4">
                 年払い（20%OFF）
               </TabsTrigger>
             </TabsList>
-          </div>
+          </Tabs>
+        </div>
 
-          <TabsContent value="monthly" className="mt-0 outline-none">
-            <PlanGrid billing="monthly" pendingPlan={pendingPlan} onStartCheckout={handleStartCheckout} />
-          </TabsContent>
-          <TabsContent value="yearly" className="mt-0 outline-none">
-            <PlanGrid billing="yearly" pendingPlan={pendingPlan} onStartCheckout={handleStartCheckout} />
-          </TabsContent>
-        </Tabs>
+        <section className="grid gap-6 md:grid-cols-2">
+          <PlanCard
+            plan={FREE_PLAN}
+            pendingPlan={pendingPlan}
+            onStartCheckout={handleStartCheckout}
+            currentPlanTier={billingStatus?.planTier ?? "free"}
+            onOpenPortal={handleOpenPortal}
+            pendingPortal={pendingPortal}
+          />
+          <PlanCard
+            plan={UNLIMITED_PLAN}
+            billing={selectedBilling}
+            pendingPlan={pendingPlan}
+            onStartCheckout={handleStartCheckout}
+            currentPlanTier={billingStatus?.planTier ?? "free"}
+            onOpenPortal={handleOpenPortal}
+            pendingPortal={pendingPortal}
+          />
+        </section>
 
         {/* Top-up */}
         <section className="mx-auto mt-16 max-w-2xl rounded-2xl border border-dashed bg-muted/20 p-8 text-center md:mt-20">
           <h2 className="text-lg font-semibold tracking-tight md:text-xl">
-            追加の実験枠が必要なときだけ
+            足りなくなったら、その場で購入。
           </h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            このアプリの主価値は「DNA資産の深さ」ですが、短期的な検証量の増加にも対応できます。
+            無料プランのまま、今日だけ追加で使いたい時に購入できます。
           </p>
-          <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-6">
-            <div className="rounded-xl border bg-background/80 px-6 py-4 text-left shadow-sm">
-              <p className="text-sm font-medium">20クレジット</p>
+          <div className="mx-auto mt-6 flex w-full max-w-xl flex-col items-center justify-between gap-4 rounded-xl border bg-background/80 px-6 py-5 text-left shadow-sm sm:flex-row">
+            <div>
+              <p className="text-sm font-medium">20クレジット（約20回の追加生成）</p>
               <p className="text-2xl font-bold tabular-nums">¥500〜</p>
-              <p className="text-xs text-muted-foreground">必要な分だけ検証実行枠を追加</p>
+              <p className="text-xs text-muted-foreground">無料プランの不足分を、その日だけ補える追加枠</p>
             </div>
-            <CheckoutLink href={checkout.topup20} variant="outline" className="max-w-xs">
+            <CheckoutLink href={checkout.topup20} variant="outline" className="w-full sm:w-auto sm:min-w-44">
               追加枠を購入する
             </CheckoutLink>
           </div>
           <p className="mt-4 text-xs text-muted-foreground">
             Stripe Checkout の Payment Link または Price ID を設定すると有効化されます。
           </p>
+        </section>
+
+        <section className="mx-auto mt-12 max-w-3xl rounded-2xl border bg-background/80 p-6">
+          <h2 className="text-lg font-semibold">FAQ</h2>
+          <div className="mt-4 space-y-4 text-sm">
+            <div>
+              <p className="font-medium">いつでも解約できますか？</p>
+              <p className="text-muted-foreground">
+                はい。契約の管理ボタンからStripeカスタマーポータルへ進み、いつでも解約できます。
+              </p>
+            </div>
+            <div>
+              <p className="font-medium">データは学習に使われますか？</p>
+              <p className="text-muted-foreground">
+                ユーザーごとのIdentity運用と機能提供のためにのみ利用し、無断で汎用学習データとして公開利用しません。
+              </p>
+            </div>
+          </div>
         </section>
 
         <section className="mt-12 border-t pt-8 text-center text-sm text-muted-foreground">
@@ -208,30 +317,6 @@ export function PlansContent() {
   );
 }
 
-function PlanGrid({
-  billing,
-  pendingPlan,
-  onStartCheckout,
-}: {
-  billing: Billing;
-  pendingPlan: string | null;
-  onStartCheckout: (planTier: "basic" | "creator" | "pro", billing: Billing) => Promise<void>;
-}) {
-  return (
-    <div className="grid gap-6 md:grid-cols-3 md:items-end md:gap-4 lg:gap-6">
-      {PLANS.map((plan) => (
-        <PlanCard
-          key={plan.subtitle}
-          plan={plan}
-          billing={billing}
-          pendingPlan={pendingPlan}
-          onStartCheckout={onStartCheckout}
-        />
-      ))}
-    </div>
-  );
-}
-
 type Billing = "monthly" | "yearly";
 
 function PlanCard({
@@ -239,21 +324,34 @@ function PlanCard({
   billing,
   pendingPlan,
   onStartCheckout,
+  currentPlanTier,
+  onOpenPortal,
+  pendingPortal,
 }: {
   plan: PlanRow;
-  billing: Billing;
-  pendingPlan: string | null;
-  onStartCheckout: (planTier: "basic" | "creator" | "pro", billing: Billing) => Promise<void>;
+  billing?: Billing;
+  pendingPlan?: string | null;
+  onStartCheckout?: (billing: Billing) => Promise<void>;
+  currentPlanTier?: "free" | "pro";
+  onOpenPortal?: () => Promise<void>;
+  pendingPortal?: boolean;
 }) {
+  const isPaid = typeof plan.monthly === "number";
+  const monthlyPrice = plan.monthly ?? 0;
+  const isUnlimitedCurrent = currentPlanTier === "pro";
   const isYearly = billing === "yearly";
-  const priceLabel = isYearly
-    ? `${yearlyTotalJpy(plan.monthly).toLocaleString("ja-JP")}円 / 年`
-    : `${plan.monthly.toLocaleString("ja-JP")}円 / 月`;
-  const subLabel = isYearly
-    ? `月あたり ${yearlyMonthlyEquivalentJpy(plan.monthly).toLocaleString("ja-JP")}円 相当`
-    : "いつでも解約可能";
+  const priceLabel = !isPaid
+    ? "0円 / 月"
+    : isYearly
+      ? `${yearlyTotalJpy(monthlyPrice).toLocaleString("ja-JP")}円 / 年`
+      : `${monthlyPrice.toLocaleString("ja-JP")}円 / 月`;
+  const subLabel = !isPaid
+    ? "いつでもUnlimitedへアップグレード可能"
+    : isYearly
+      ? `月あたり ${yearlyMonthlyEquivalentJpy(monthlyPrice).toLocaleString("ja-JP")}円 相当`
+      : "いつでも解約可能";
 
-  const pendingKey = `${plan.planTier}:${billing}`;
+  const pendingKey = `pro:${billing ?? "monthly"}`;
   const loading = pendingPlan === pendingKey;
 
   return (
@@ -261,23 +359,10 @@ function PlanCard({
       layout
       whileHover={{ y: -6 }}
       transition={{ type: "spring", stiffness: 320, damping: 24 }}
-      className={cn(
-        "relative flex h-full flex-col",
-        plan.featured && "md:-mt-4 md:mb-2 md:z-10",
-      )}
+      className="relative flex h-full flex-col"
     >
-      {plan.featured ? (
-        <div className="absolute -top-3 left-1/2 z-20 -translate-x-1/2">
-          <Badge className="bg-linear-to-r from-violet-600 to-fuchsia-600 px-3 text-white shadow-md">
-            人気 No.1
-          </Badge>
-        </div>
-      ) : null}
       <Card
-        className={cn(
-          "flex h-full flex-col overflow-hidden border bg-card/90 shadow-lg backdrop-blur-sm transition-shadow hover:shadow-xl",
-          plan.featured && "border-primary/40 shadow-primary/10 md:scale-[1.04]",
-        )}
+        className={cn("flex h-full flex-col overflow-hidden border bg-card/90 shadow-lg backdrop-blur-sm transition-shadow hover:shadow-xl")}
       >
         <CardHeader className="space-y-1 pb-2 text-center">
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -293,6 +378,9 @@ function PlanCard({
           </div>
           <ul className="flex flex-1 flex-col gap-2 border-t pt-4">
             <FeatureRow>
+              <strong className="text-foreground">AI実行回数:</strong> {plan.generationQuota}
+            </FeatureRow>
+            <FeatureRow>
               <strong className="text-foreground">DNAスロット:</strong> {plan.dnaSlot}
             </FeatureRow>
             <FeatureRow>
@@ -302,7 +390,7 @@ function PlanCard({
               <strong className="text-foreground">戦略の射程:</strong> {plan.strategyRange}
             </FeatureRow>
             <FeatureRow>
-              <strong className="text-foreground">DNA自動進化:</strong> {plan.vaultDepth}
+              <strong className="text-foreground">DNA自動進化:</strong> {plan.dnaEvolution}
             </FeatureRow>
             <FeatureRow>
               <strong className="text-foreground">My Taboo:</strong> {plan.tabooStrictness}
@@ -310,16 +398,36 @@ function PlanCard({
           </ul>
         </CardContent>
         <CardFooter className="flex flex-col gap-2 pt-0 pb-6">
-          <Button
-            size="lg"
-            className="w-full justify-center"
-            disabled={loading}
-            onClick={() => {
-              void onStartCheckout(plan.planTier, billing);
-            }}
-          >
-            {loading ? "Stripeへ接続中..." : "このプランで始める"}
-          </Button>
+          {isPaid && billing && onStartCheckout ? (
+            isUnlimitedCurrent ? (
+              <Button
+                size="lg"
+                variant="outline"
+                className="w-full justify-center"
+                disabled={pendingPortal}
+                onClick={() => {
+                  if (onOpenPortal) void onOpenPortal();
+                }}
+              >
+                {pendingPortal ? "ポータルへ接続中..." : "契約の管理（お支払い方法・解約）"}
+              </Button>
+            ) : (
+              <Button
+                size="lg"
+                className="w-full justify-center"
+                disabled={loading}
+                onClick={() => {
+                  void onStartCheckout(billing);
+                }}
+              >
+                {loading ? "Stripeへ接続中..." : "Unlimitedで始める"}
+              </Button>
+            )
+          ) : (
+            <Button size="lg" variant="secondary" className="w-full justify-center" disabled>
+              現在の無料プラン
+            </Button>
+          )}
         </CardFooter>
       </Card>
     </motion.div>

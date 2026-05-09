@@ -4,7 +4,7 @@ import { requireAuthenticatedUserFromRequest } from "@/lib/supabase/services";
 import { getStripeClient, getStripePriceId, type BillingCycle, type PlanTier } from "@/lib/stripe";
 
 const checkoutSchema = z.object({
-  planTier: z.enum(["basic", "creator", "pro"]),
+  planTier: z.enum(["pro"]),
   billingCycle: z.enum(["monthly", "yearly"]),
 });
 

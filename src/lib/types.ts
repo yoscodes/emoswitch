@@ -4,6 +4,11 @@ import type { SeriesSlotKey } from "@/lib/series";
 export type QuickFeedback = "hot" | "cold" | null;
 export type GenerationMode = "single" | "series";
 export type PersonaStatus = "empty" | "draft" | "approved";
+export type RoadmapSeriesStatus = "active" | "hot" | "archived";
+export type IdentityFieldBufferSeriesSummary = {
+  seriesId: string;
+  pendingCount: number;
+};
 
 export type GenerationRecord = {
   id: string;
@@ -29,7 +34,7 @@ export type GenerationRecord = {
   memo?: string | null;
   /** 次に観測したいポイント */
   adviceHint?: string | null;
-  /** hot/cold は「反応あり / 刺さらず」を意味する */
+  /** hot/cold は「手応えあり / 違和感あり」を意味する */
   quickFeedback?: QuickFeedback;
   memoryTags?: string[];
 };

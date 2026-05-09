@@ -10,61 +10,7 @@ import {
 import { dnaAxesSchema } from "@/lib/identity-dna-schema";
 import { getArchiveOverview, getGhostSettings, getIdentityProfile, listGenerations, listHotGenerationMemories, resolveRequestActor, saveGhostSettings, saveIdentityProfile } from "@/lib/supabase/services";
 
-const DNA_CHOICE_PREFIX = "dna_choice";
 const ANTI_PERSONA_PREFIX = "anti_persona";
-
-const DNA_QUESTION_MAP = {
-  logic_vs_emotion: {
-    prompt: "論理 vs 情緒",
-    leftLabel: "論理で切る",
-    rightLabel: "情緒で触れる",
-  },
-  break_vs_harmony: {
-    prompt: "破壊 vs 調和",
-    leftLabel: "古い前提を壊す",
-    rightLabel: "関係を崩さず動かす",
-  },
-  crowd_vs_solitude: {
-    prompt: "大衆 vs 孤独",
-    leftLabel: "大衆の課題に開く",
-    rightLabel: "孤独な違和感を掘る",
-  },
-  speed_vs_density: {
-    prompt: "スピード vs 密度",
-    leftLabel: "まず速く試す",
-    rightLabel: "密度高く磨く",
-  },
-  utility_vs_philosophy: {
-    prompt: "実利 vs 思想",
-    leftLabel: "役に立つを先に出す",
-    rightLabel: "思想から世界観を作る",
-  },
-  efficiency_vs_emotion: {
-    prompt: "事業を前に進めるときの反応軸",
-    leftLabel: "効率を重視する",
-    rightLabel: "情緒を重視する",
-  },
-  destroyer_vs_guardian: {
-    prompt: "市場で取りたい役割",
-    leftLabel: "破壊者でありたい",
-    rightLabel: "守護者でありたい",
-  },
-  proof_vs_instinct: {
-    prompt: "意思決定の起点",
-    leftLabel: "証拠で進めたい",
-    rightLabel: "直感で切り込みたい",
-  },
-  sharp_vs_gentle: {
-    prompt: "市場への語り口",
-    leftLabel: "鋭く切り込みたい",
-    rightLabel: "やわらかく伝えたい",
-  },
-  minority_vs_majority: {
-    prompt: "立ち位置",
-    leftLabel: "少数派の違和感に立つ",
-    rightLabel: "多数派の課題を拾う",
-  },
-} as const;
 
 const ANTI_PERSONA_LABELS = {
   avoid_phrases: "絶対に避ける言い回し",
@@ -95,24 +41,12 @@ function uniqueLines(lines: Array<string | null | undefined>, limit: number): st
 }
 
 function parsePersonaControls(manualPosts: string[]) {
-  const dnaChoices: string[] = [];
   const antiPersona: string[] = [];
   const legacyLines: string[] = [];
-  const axisChoices: Partial<Record<keyof typeof DNA_QUESTION_MAP, "left" | "right">> = {};
 
   for (const rawLine of manualPosts) {
     const line = rawLine.trim();
     if (!line) continue;
-
-    if (line.startsWith(`${DNA_CHOICE_PREFIX}|`)) {
-      const [, id, value] = line.split("|");
-      const meta = DNA_QUESTION_MAP[id as keyof typeof DNA_QUESTION_MAP];
-      if (meta && (value === "left" || value === "right")) {
-        axisChoices[id as keyof typeof DNA_QUESTION_MAP] = value;
-        dnaChoices.push(`${meta.prompt}: ${value === "left" ? meta.leftLabel : meta.rightLabel}`);
-        continue;
-      }
-    }
 
     if (line.startsWith(`${ANTI_PERSONA_PREFIX}|`)) {
       const [, id, ...rest] = line.split("|");
@@ -127,19 +61,7 @@ function parsePersonaControls(manualPosts: string[]) {
     legacyLines.push(line);
   }
 
-  return { dnaChoices, antiPersona, legacyLines, axisChoices };
-}
-
-function buildCurrentProphecy(axisChoices: Partial<Record<keyof typeof DNA_QUESTION_MAP, "left" | "right">>): string {
-  const logicEmotion = axisChoices.logic_vs_emotion;
-  const breakHarmony = axisChoices.break_vs_harmony;
-  const crowdSolitude = axisChoices.crowd_vs_solitude;
-  if (!logicEmotion || !breakHarmony || !crowdSolitude) return "平均的な起業家";
-
-  const tone = logicEmotion === "left" ? "論理的な" : "情緒的な";
-  const posture = breakHarmony === "left" ? "異端児" : "調律者";
-  const audience = crowdSolitude === "left" ? "市場翻訳型" : "少数派特化型";
-  return `${tone}${posture} / ${audience}`;
+  return { antiPersona, legacyLines };
 }
 
 function calculateDnaCompleteness(params: {
@@ -184,9 +106,9 @@ export async function POST(request: Request) {
       16,
     );
 
-    if (sourceLines.length === 0 && controls.dnaChoices.length === 0 && controls.antiPersona.length === 0) {
+    if (sourceLines.length === 0 && controls.antiPersona.length === 0) {
       return Response.json(
-        { error: "/lab の行動ログ、二択DNA、または Anti-Persona を先に用意してください。" },
+        { error: "/lab の行動ログ、または Anti-Persona を先に用意してください。" },
         { status: 400 },
       );
     }
@@ -204,15 +126,12 @@ export async function POST(request: Request) {
           "summary は、その人がどんな思想で事業の種を選び、どんな市場への向き合い方をしそうかを日本語で要約する。",
           "evidence は、なぜそう判断したかをユーザーが納得できる説明文にする。",
           "stylePrompt は、生成時にそのまま使える『起業家スタンスメモ』として一文に整える。",
-          "二択DNAは、その人の価値観の土台として強く反映する。",
           "Anti-Persona は『こうはなりたくない』『こうは語りたくない』という境界線として扱い、summary と stylePrompt に必ず反映する。",
           "Auto-Growing Identity なので、最近の /lab の種メモ・採用文・検証メモ・反応ログから、その人の Being を逆算する。",
           "外部サイトの中身を読んだ前提では書かない。与えられた材料から推定できることだけを書く。",
         ].join("\n"),
         prompt: [
           "以下の材料から、このユーザーの起業家としてのアイデンティティ（Identity）を分析してください。",
-          "",
-          controls.dnaChoices.length > 0 ? `二択DNA:\n${controls.dnaChoices.map((line) => `- ${line}`).join("\n")}` : "二択DNA: 指定なし",
           "",
           controls.antiPersona.length > 0
             ? `Anti-Persona:\n${controls.antiPersona.map((line) => `- ${line}`).join("\n")}`
@@ -238,11 +157,11 @@ export async function POST(request: Request) {
     );
 
     const nextAxes = dnaAxesSchema.parse({
-      logic_vs_emotion: controls.axisChoices.logic_vs_emotion ?? null,
-      break_vs_harmony: controls.axisChoices.break_vs_harmony ?? null,
-      crowd_vs_solitude: controls.axisChoices.crowd_vs_solitude ?? null,
-      speed_vs_density: controls.axisChoices.speed_vs_density ?? null,
-      utility_vs_philosophy: controls.axisChoices.utility_vs_philosophy ?? null,
+      logic_vs_emotion: null,
+      break_vs_harmony: null,
+      crowd_vs_solitude: null,
+      speed_vs_density: null,
+      utility_vs_philosophy: null,
       persona_keywords: object.keywords,
       persona_summary: object.summary,
     });
@@ -255,7 +174,7 @@ export async function POST(request: Request) {
           anti_persona: controls.antiPersona,
           ng_words: settings.ngWords,
         },
-        currentProphecy: buildCurrentProphecy(controls.axisChoices),
+        currentProphecy: object.stylePrompt || object.summary,
         dnaCompleteness: calculateDnaCompleteness({
           keywordCount: object.keywords.length,
           hasSummary: object.summary.trim().length > 0,

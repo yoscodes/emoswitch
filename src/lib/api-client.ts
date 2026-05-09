@@ -12,6 +12,7 @@ import type {
   GenerationSeriesItemRecord,
   GenerationSeriesRecord,
   GhostSettings,
+  IdentityFieldBufferSeriesSummary,
   UserProfileSettings,
 } from "@/lib/types";
 import type { SeriesSlotKey } from "@/lib/series";
@@ -187,13 +188,32 @@ export type SaveSeriesPayload = Omit<GenerationSeriesRecord, "id" | "createdAt" 
 };
 
 export async function createStripeCheckoutSession(payload: {
-  planTier: "basic" | "creator" | "pro";
+  planTier: "pro";
   billingCycle: "monthly" | "yearly";
 }): Promise<{ url: string }> {
   return requestJson<{ url: string }>("/api/stripe/checkout", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function createStripePortalSession(): Promise<{ url: string }> {
+  return requestJson<{ url: string }>("/api/stripe/portal", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export type BillingStatus = {
+  planTier: "free" | "pro";
+  billingCycle: "monthly" | "yearly" | null;
+  isActive: boolean;
+};
+
+export async function fetchBillingStatus(): Promise<BillingStatus> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ status: BillingStatus }>("/api/billing/status");
+  return data.status;
 }
 
 export function notifyDataSync(): void {
@@ -364,6 +384,37 @@ export async function patchSeriesItemRecord(
   });
   notifyDataSync();
   return data.row;
+}
+
+export async function appendIdentityFieldBufferEntry(payload: {
+  seriesId: string;
+  itemId: string;
+  quickFeedback: "hot" | "cold" | null;
+  likes: number | null;
+  memo: string | null;
+}): Promise<void> {
+  await ensureDemoWorkspace();
+  await requestJson("/api/identity-field-buffer", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  notifyDataSync();
+}
+
+export async function fetchIdentityFieldBufferSeriesSummary(): Promise<IdentityFieldBufferSeriesSummary[]> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ rows: IdentityFieldBufferSeriesSummary[] }>("/api/identity-field-buffer");
+  return data.rows;
+}
+
+export async function resolveIdentityFieldBufferEntries(): Promise<number> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ resolvedCount: number }>("/api/identity-field-buffer/resolve", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  notifyDataSync();
+  return data.resolvedCount;
 }
 
 export async function removeGenerationRecord(id: string): Promise<void> {

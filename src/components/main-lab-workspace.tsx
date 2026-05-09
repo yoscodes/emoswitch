@@ -635,7 +635,6 @@ export function MainLabWorkspace() {
     "empty" | "draft" | "approved"
   >("empty");
   const [manualPosts, setManualPosts] = useState<string[]>([]);
-  const [identitySyncCue, setIdentitySyncCue] = useState(false);
   const [activeTemplateId, setActiveTemplateId] =
     useState<StrategyTemplateId | null>(null);
   const [usagePurposeId, setUsagePurposeId] =
@@ -767,11 +766,6 @@ export function MainLabWorkspace() {
     else if (personaStatus === "draft") p = Math.max(p, 52);
     return Math.min(100, p);
   }, [manualPosts, personaKeywords, personaStatus, personaSummary]);
-  /** SEED 列のゲージ: Identity DNA と、Scrap＋シート＋特記事項（任意）の埋まりを半々で合成 */
-  const dnaLabGaugePercent = Math.min(
-    100,
-    Math.round((identityExtractionPercent + seedReadinessPercent) / 2),
-  );
   const sprintTimelinePhases = useMemo(
     () =>
       seriesRoadmap.map((phase, index) => {
@@ -951,16 +945,6 @@ export function MainLabWorkspace() {
     return () => {
       active = false;
     };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const raw = sessionStorage.getItem("emoswitch_identity_sync_glow");
-    if (!raw) return;
-    sessionStorage.removeItem("emoswitch_identity_sync_glow");
-    setIdentitySyncCue(true);
-    const timeoutId = window.setTimeout(() => setIdentitySyncCue(false), 2400);
-    return () => window.clearTimeout(timeoutId);
   }, []);
 
   useEffect(() => {
@@ -1414,18 +1398,6 @@ export function MainLabWorkspace() {
                 "relative",
               )}
             >
-              <div
-                className="pointer-events-none absolute -left-1 top-[4.5rem] bottom-32 z-10 hidden w-4 lg:block"
-                aria-hidden
-              >
-                <div
-                  className="h-full w-full bg-gradient-to-r from-violet-500/15 via-transparent to-transparent opacity-90 dark:from-violet-400/12"
-                  style={{
-                    opacity: 0.12 + dnaLabGaugePercent * 0.006,
-                    transform: "translateX(2px)",
-                  }}
-                />
-              </div>
               <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex min-w-0 items-start gap-2.5">
@@ -1442,35 +1414,6 @@ export function MainLabWorkspace() {
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    <div
-                      className="flex flex-col items-end gap-1"
-                      title={`DNA（Identity）推定 ${identityExtractionPercent}% と、Scrap・シート・特記事項（任意）の埋まり ${seedReadinessPercent}% を半々に合成。右の生成へ向けた充填度です。`}
-                    >
-                      <p className="text-[10px] font-semibold tracking-wide text-muted-foreground">
-                        DNA 整理度
-                      </p>
-                      <div
-                        className={cn(
-                          "relative grid size-9 shrink-0 place-items-center rounded-full transition-all duration-700",
-                          identitySyncCue &&
-                            "shadow-[0_0_28px_-8px_rgba(139,92,246,0.85)]",
-                        )}
-                        style={{
-                          background: `conic-gradient(rgba(124,58,237,0.92) 0% ${dnaLabGaugePercent}%, rgba(228,228,231,0.42) ${dnaLabGaugePercent}% 100%)`,
-                          boxShadow:
-                            dnaLabGaugePercent > 0
-                              ? `0 0 ${12 + Math.round(dnaLabGaugePercent * 0.22)}px -2px rgba(124,58,237,0.35)`
-                              : undefined,
-                        }}
-                      >
-                        <div className="grid size-[2.15rem] place-items-center rounded-full bg-background/95 text-center">
-                          <p className="text-[11px] font-semibold tabular-nums leading-none text-foreground">
-                            {dnaLabGaugePercent}
-                            <span className="text-[9px] font-semibold">%</span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
                     <Badge
                       variant="secondary"
                       className="rounded-full text-[10px]"

@@ -88,12 +88,30 @@ export function summarizeIdentityFieldBuffer(logs: readonly IdentityFieldLogEntr
   return { total: logs.length, hot, cold, withMemo };
 }
 
+export function summarizeIdentityFieldBufferBySeries(
+  logs: readonly IdentityFieldLogEntryV1[],
+): Record<string, { total: number; hot: number; cold: number; withMemo: number }> {
+  const out: Record<string, { total: number; hot: number; cold: number; withMemo: number }> = {};
+  for (const e of logs) {
+    const key = e.seriesId;
+    if (!key) continue;
+    if (!out[key]) {
+      out[key] = { total: 0, hot: 0, cold: 0, withMemo: 0 };
+    }
+    out[key].total += 1;
+    if (e.quickFeedback === "hot") out[key].hot += 1;
+    if (e.quickFeedback === "cold") out[key].cold += 1;
+    if (e.memo?.trim()) out[key].withMemo += 1;
+  }
+  return out;
+}
+
 /** Lab の Scrap 先頭へ貼る用。Roadmap 検証バッファをそのまま Raw Context に混ぜられる */
 export function formatIdentityFieldBufferForLabScrap(entries: readonly IdentityFieldLogEntryV1[]): string {
   if (entries.length === 0) return "";
   const lines = entries.map((e, i) => {
     const fb =
-      e.quickFeedback === "hot" ? "反応あり" : e.quickFeedback === "cold" ? "刺さらず" : "反応ラベル未設定";
+      e.quickFeedback === "hot" ? "手応えあり" : e.quickFeedback === "cold" ? "違和感あり" : "反応ラベル未設定";
     const parts: string[] = [`${i + 1}. [${fb}]`];
     if (e.likes != null && e.likes > 0) parts.push(`数値: ${e.likes}`);
     if (e.memo?.trim()) parts.push(`想定とのズレ: ${e.memo.trim()}`);

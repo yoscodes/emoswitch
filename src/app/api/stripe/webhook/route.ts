@@ -5,16 +5,30 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 
 function resolvePlanTierFromPriceId(priceId: string | null | undefined): "free" | "basic" | "creator" | "pro" {
   if (!priceId) return "free";
-  if (priceId === process.env.STRIPE_PRICE_BASIC_MONTHLY || priceId === process.env.STRIPE_PRICE_BASIC_YEARLY) {
-    return "basic";
-  }
-  if (priceId === process.env.STRIPE_PRICE_CREATOR_MONTHLY || priceId === process.env.STRIPE_PRICE_CREATOR_YEARLY) {
-    return "creator";
-  }
-  if (priceId === process.env.STRIPE_PRICE_PRO_MONTHLY || priceId === process.env.STRIPE_PRICE_PRO_YEARLY) {
+  if (
+    priceId === process.env.STRIPE_PRICE_UNLIMITED_MONTHLY ||
+    priceId === process.env.STRIPE_PRICE_UNLIMITED_YEARLY ||
+    priceId === process.env.STRIPE_PRICE_PRO_MONTHLY ||
+    priceId === process.env.STRIPE_PRICE_PRO_YEARLY
+  ) {
     return "pro";
   }
   return "free";
+}
+
+function readIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getMonthlyAllowanceCredits(): number {
+  return readIntEnv("BILLING_UNLIMITED_MONTHLY_ALLOWANCE_CREDITS", 3000);
+}
+
+function getUpgradeProrationCredits(): number {
+  return readIntEnv("BILLING_UNLIMITED_UPGRADE_PRORATION_CREDITS", 500);
 }
 
 async function upsertProfileFromCustomer(params: {
@@ -97,6 +111,69 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
   });
 }
 
+async function findUserIdByCustomerId(customerId: string): Promise<string | null> {
+  const { data: profile, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id")
+    .eq("stripe_customer_id", customerId)
+    .maybeSingle<{ id: string }>();
+  if (error) throw error;
+  return profile?.id ?? null;
+}
+
+async function grantCreditsFromInvoice(invoice: Stripe.Invoice) {
+  if (!invoice.paid) return;
+  if (!invoice.id) return;
+
+  const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id;
+  if (!customerId) return;
+  const userId = await findUserIdByCustomerId(customerId);
+  if (!userId) return;
+
+  const subscriptionLine = invoice.lines.data.find((line) => line.type === "subscription") ?? invoice.lines.data[0];
+  const priceId = subscriptionLine?.pricing && "price_details" in subscriptionLine.pricing
+    ? subscriptionLine.pricing.price_details?.price
+    : null;
+  const planTier = resolvePlanTierFromPriceId(priceId);
+  if (planTier !== "pro") return;
+
+  let reason: "monthly_allowance" | "plan_upgrade_proration" | null = null;
+  let credits = 0;
+  if (invoice.billing_reason === "subscription_update") {
+    reason = "plan_upgrade_proration";
+    credits = getUpgradeProrationCredits();
+  } else if (
+    invoice.billing_reason === "subscription_create" ||
+    invoice.billing_reason === "subscription_cycle"
+  ) {
+    reason = "monthly_allowance";
+    credits = getMonthlyAllowanceCredits();
+  }
+  if (!reason || credits <= 0) return;
+
+  const { error } = await supabaseAdmin.from("credit_ledger").insert({
+    user_id: userId,
+    delta: credits,
+    reason,
+    note: reason === "monthly_allowance" ? "Unlimited 月次クレジット付与" : "Unlimited アップグレード按分付与",
+    metadata: {
+      source: "stripe_webhook",
+      source_event: "invoice.paid",
+      stripe_invoice_id: invoice.id,
+      stripe_customer_id: customerId,
+      stripe_subscription_id:
+        typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id ?? null,
+      stripe_price_id: priceId,
+      billing_reason: invoice.billing_reason ?? null,
+    },
+  });
+  if (error) {
+    // Unique index guards duplicated invoice delivery. Ignore duplicate-key errors.
+    if (error.code === "23505") return;
+    throw error;
+  }
+}
+
 export async function POST(request: Request) {
   const stripe = getStripeClient();
   const secret = getStripeWebhookSecret();
@@ -131,6 +208,10 @@ export async function POST(request: Request) {
       case "customer.subscription.created":
       case "customer.subscription.deleted": {
         await handleSubscriptionUpdate(event.data.object as Stripe.Subscription);
+        break;
+      }
+      case "invoice.paid": {
+        await grantCreditsFromInvoice(event.data.object as Stripe.Invoice);
         break;
       }
       default:

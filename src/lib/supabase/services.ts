@@ -173,6 +173,18 @@ type DbVaultLogRow = {
   created_at: string;
 };
 
+type DbIdentityFieldBufferEntryRow = {
+  id: string;
+  user_id: string;
+  series_id: string;
+  item_id: string;
+  quick_feedback: QuickFeedback;
+  likes: number | null;
+  memo: string | null;
+  created_at: string;
+  resolved_at: string | null;
+};
+
 type SeriesInsertItem = {
   slotKey: SeriesSlotKey;
   slotLabel: string;
@@ -198,6 +210,19 @@ export type IdentityProfile = {
   currentProphecy: string;
   dnaCompleteness: number;
   version: number;
+};
+
+export type IdentityFieldBufferEntryInput = {
+  seriesId: string;
+  itemId: string;
+  quickFeedback: QuickFeedback;
+  likes: number | null;
+  memo: string | null;
+};
+
+export type IdentityFieldBufferSeriesSummary = {
+  seriesId: string;
+  pendingCount: number;
 };
 
 type GenerationCreateInput = Omit<GenerationRecord, "id" | "createdAt">;
@@ -1952,6 +1977,55 @@ export async function updateGenerationSeriesItem(
   return requireGenerationSeriesById(currentRow.series_id, scopedUserId).then(
     (series) => series.items.find((item) => item.id === id) as GenerationSeriesItemRecord,
   );
+}
+
+export async function appendIdentityFieldBufferEntry(
+  entry: IdentityFieldBufferEntryInput,
+  userId?: string,
+): Promise<void> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const { error } = await supabaseAdmin.from("identity_field_buffer_entries").insert({
+    user_id: scopedUserId,
+    series_id: entry.seriesId,
+    item_id: entry.itemId,
+    quick_feedback: entry.quickFeedback,
+    likes: entry.likes,
+    memo: entry.memo,
+  });
+  if (error) throw error;
+}
+
+export async function listIdentityFieldBufferSeriesSummary(
+  userId?: string,
+): Promise<IdentityFieldBufferSeriesSummary[]> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const { data, error } = await supabaseAdmin
+    .from("identity_field_buffer_entries")
+    .select("series_id")
+    .eq("user_id", scopedUserId)
+    .is("resolved_at", null)
+    .returns<Pick<DbIdentityFieldBufferEntryRow, "series_id">[]>();
+  if (error) throw error;
+  const countBySeries = new Map<string, number>();
+  for (const row of data ?? []) {
+    countBySeries.set(row.series_id, (countBySeries.get(row.series_id) ?? 0) + 1);
+  }
+  return Array.from(countBySeries.entries()).map(([seriesId, pendingCount]) => ({
+    seriesId,
+    pendingCount,
+  }));
+}
+
+export async function resolveIdentityFieldBufferEntries(userId?: string): Promise<number> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const { data, error } = await supabaseAdmin
+    .from("identity_field_buffer_entries")
+    .update({ resolved_at: new Date().toISOString() })
+    .eq("user_id", scopedUserId)
+    .is("resolved_at", null)
+    .select("id");
+  if (error) throw error;
+  return data?.length ?? 0;
 }
 
 export async function softDeleteGeneration(id: string, userId?: string): Promise<void> {

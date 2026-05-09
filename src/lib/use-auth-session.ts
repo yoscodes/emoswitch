@@ -10,7 +10,7 @@ type AuthSessionState = {
   loading: boolean;
   session: Session | null;
   user: User | null;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: (nextPath?: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -41,8 +41,8 @@ export function useAuthSession(): AuthSessionState {
     };
   }, []);
 
-  const signInWithGoogle = async () => {
-    const redirectTo = `${window.location.origin}/auth/callback`;
+  const signInWithGoogle = async (nextPath = "/lab") => {
+    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo },
