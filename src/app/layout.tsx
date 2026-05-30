@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Identity DNA",
-  description: "起業家の Identity から事業仮説を削り出し、市場反応で磨く仮説検証ワークスペース。",
+  title: "Concept Forge",
+  description: "言葉にできない事業案を、伝わるコンセプトへ鍛える起業家向けワークスペース。",
 };
 
 export default function RootLayout({

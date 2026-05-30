@@ -122,7 +122,6 @@ async function findUserIdByCustomerId(customerId: string): Promise<string | null
 }
 
 async function grantCreditsFromInvoice(invoice: Stripe.Invoice) {
-  if (!invoice.paid) return;
   if (!invoice.id) return;
 
   const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id;
@@ -130,10 +129,12 @@ async function grantCreditsFromInvoice(invoice: Stripe.Invoice) {
   const userId = await findUserIdByCustomerId(customerId);
   if (!userId) return;
 
-  const subscriptionLine = invoice.lines.data.find((line) => line.type === "subscription") ?? invoice.lines.data[0];
-  const priceId = subscriptionLine?.pricing && "price_details" in subscriptionLine.pricing
-    ? subscriptionLine.pricing.price_details?.price
-    : null;
+  const subscriptionLine = invoice.lines.data[0];
+  const rawPriceId =
+    subscriptionLine?.pricing && "price_details" in subscriptionLine.pricing
+      ? subscriptionLine.pricing.price_details?.price
+      : null;
+  const priceId = typeof rawPriceId === "string" ? rawPriceId : rawPriceId?.id ?? null;
   const planTier = resolvePlanTierFromPriceId(priceId);
   if (planTier !== "pro") return;
 
@@ -162,7 +163,9 @@ async function grantCreditsFromInvoice(invoice: Stripe.Invoice) {
       stripe_invoice_id: invoice.id,
       stripe_customer_id: customerId,
       stripe_subscription_id:
-        typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id ?? null,
+        typeof invoice.parent?.subscription_details?.subscription === "string"
+          ? invoice.parent.subscription_details.subscription
+          : invoice.parent?.subscription_details?.subscription?.id ?? null,
       stripe_price_id: priceId,
       billing_reason: invoice.billing_reason ?? null,
     },

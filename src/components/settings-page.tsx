@@ -3,25 +3,39 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Copy, CreditCard, Download, MoonStar, RefreshCcw, ShieldAlert, UserCircle2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Copy, CreditCard, MoonStar, UserCircle2 } from "lucide-react";
 
 import {
   fetchCreditSummary,
-  fetchGenerations,
   fetchGhostSettings,
   fetchUserProfile,
-  resetArchive,
   updateGhostSettings,
   saveUserProfile,
 } from "@/lib/api-client";
 import { useAuthSession } from "@/lib/use-auth-session";
-import type { CreditSummary, GenerationRecord, GhostSettings, UserProfileSettings } from "@/lib/types";
+import type { CreditSummary, GhostSettings, UserProfileSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
+
+const SETTINGS_TABS = ["profile", "credit", "app"] as const;
+type SettingsTab = (typeof SETTINGS_TABS)[number];
+
+function parseSettingsTab(value: string | null): SettingsTab {
+  if (value && (SETTINGS_TABS as readonly string[]).includes(value)) {
+    return value as SettingsTab;
+  }
+  return "profile";
+}
+
+const SETTINGS_TAB_CRUMB: Record<SettingsTab, string> = {
+  profile: "プロフィール",
+  credit: "プラン・使用量",
+  app: "アプリ情報",
+};
 
 const EMOTION_OPTIONS = [
   { value: "empathy", label: "共感導入" },
@@ -59,60 +73,17 @@ function buildPreview(profile: UserProfileSettings | null): string {
   return `${toneMap[profile.writingStyle]}。初期の市場への見せ方は「${EMOTION_OPTIONS.find((item) => item.value === profile.defaultEmotion)?.label ?? "共感導入"}」で始まり、語尾は「${endingMap[profile.sentenceStyle]}」の雰囲気になります。`;
 }
 
-function escapeCsv(value: string | number | null | undefined): string {
-  const text = String(value ?? "");
-  return `"${text.replaceAll('"', '""')}"`;
-}
-
-function buildCsv(rows: GenerationRecord[]): string {
-  const header = [
-    "id",
-    "createdAt",
-    "draft",
-    "emotion",
-    "intensity",
-    "speedMode",
-    "selectedIndex",
-    "likes",
-    "memo",
-    "variants",
-    "hashtags",
-  ];
-
-  const lines = rows.map((row) =>
-    [
-      row.id,
-      row.createdAt,
-      row.draft,
-      row.emotion,
-      row.intensity,
-      row.speedMode ?? "",
-      row.selectedIndex,
-      row.likes,
-      row.memo ?? "",
-      row.variants.join(" / "),
-      row.hashtags.join(" "),
-    ]
-      .map(escapeCsv)
-      .join(","),
-  );
-
-  return [header.join(","), ...lines].join("\n");
-}
-
-function parseNgWords(value: string): string[] {
-  return Array.from(
-    new Set(
-      value
-        .split(/[\n,、]/)
-        .map((entry) => entry.trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
 export function SettingsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeTab = parseSettingsTab(searchParams.get("tab"));
   const { user, loading: authLoading } = useAuthSession();
+
+  useEffect(() => {
+    if (searchParams.get("tab") === "identity") {
+      router.replace("/identity");
+    }
+  }, [router, searchParams]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfileSettings | null>(null);
   const [credit, setCredit] = useState<CreditSummary | null>(null);
@@ -122,10 +93,8 @@ export function SettingsPage() {
   const [writingStyle, setWritingStyle] = useState<UserProfileSettings["writingStyle"]>("casual");
   const [sentenceStyle, setSentenceStyle] = useState<UserProfileSettings["sentenceStyle"]>("friendly");
   const [profileUrlDraft, setProfileUrlDraft] = useState("");
-  const [ngRawDraft, setNgRawDraft] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -150,7 +119,6 @@ export function SettingsPage() {
         setWritingStyle(profileData.writingStyle);
         setSentenceStyle(profileData.sentenceStyle);
         setProfileUrlDraft(ghostData.profileUrl);
-        setNgRawDraft(ghostData.ngWords.join("\n"));
       } catch (e) {
         setError(e instanceof Error ? e.message : "設定情報の取得に失敗しました");
       } finally {
@@ -204,38 +172,6 @@ export function SettingsPage() {
     }
   };
 
-  const handleExportCsv = async () => {
-    try {
-      const rows = await fetchGenerations();
-      const csv = buildCsv(rows);
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `emoswitch-archive-${new Date().toISOString().slice(0, 10)}.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
-      setStatus("保存しました。");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました。");
-    }
-  };
-
-  const handleResetArchive = async () => {
-    if (!window.confirm("市場反応ログをすべて非表示にします。よろしいですか？")) return;
-    setResetting(true);
-    setError(null);
-    setStatus(null);
-    try {
-      const result = await resetArchive();
-      setStatus("保存しました。");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました。");
-    } finally {
-      setResetting(false);
-    }
-  };
-
   const handleSaveProfileImport = async () => {
     if (!ghostSettings) return;
     setError(null);
@@ -254,24 +190,6 @@ export function SettingsPage() {
     }
   };
 
-  const handleSaveNgWords = async () => {
-    if (!ghostSettings) return;
-    setError(null);
-    setStatus(null);
-    try {
-      const nextGhost = await updateGhostSettings({
-        profileUrl: ghostSettings.profileUrl,
-        ngWords: parseNgWords(ngRawDraft),
-        stylePrompt: ghostSettings.stylePrompt,
-      });
-      setGhostSettings(nextGhost);
-      setNgRawDraft(nextGhost.ngWords.join("\n"));
-      setStatus("保存しました。");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました。");
-    }
-  };
-
   const hasSavedProfileUrl = (ghostSettings?.profileUrl ?? "").trim() !== "";
   const urlFeedback =
     profileUrlDraft.trim() === ""
@@ -282,7 +200,7 @@ export function SettingsPage() {
 
   if (authLoading || loading) {
     return (
-      <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 pb-28 md:px-6">
+      <div className="mx-auto max-w-5xl space-y-6 px-4 pb-28 pt-4 md:px-6 md:pt-5">
         <div className="h-8 w-48 animate-pulse rounded bg-muted" />
         <div className="grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
           <div className="h-72 animate-pulse rounded-2xl bg-muted" />
@@ -298,7 +216,7 @@ export function SettingsPage() {
         <header className="space-y-2">
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">設定</h1>
           <p className="text-muted-foreground">
-            設定ページは Google ログイン後に利用できます。ログインすると、プロフィールや検証データ管理を自分専用で整えられます。
+            設定ページは Google ログイン後に利用できます。ログインすると、プロフィールや Identity を自分専用で整えられます。
           </p>
         </header>
       </div>
@@ -306,25 +224,35 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 pb-28 md:px-6">
-      <header className="space-y-2">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <UserCircle2 className="size-5" />
-          <span className="text-sm font-medium">設定</span>
-        </div>
-        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">自分の検証環境を整える</h1>
-        <p className="text-muted-foreground">
-          プロフィール、起業家スタンス、ペルソナ連携、データ管理を一つの場所にまとめています。
-        </p>
+    <div className="mx-auto max-w-5xl space-y-6 px-4 pb-28 pt-4 md:px-6 md:pt-5">
+      <header className="space-y-1.5">
+        <nav
+          className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground md:text-xs"
+          aria-label="現在位置"
+        >
+          <UserCircle2 className="size-3.5 shrink-0 opacity-70 md:size-4" aria-hidden />
+          <span className="font-medium text-foreground/75">設定</span>
+          <span className="text-muted-foreground/70" aria-hidden>
+            /
+          </span>
+          <span className="font-medium text-foreground">{SETTINGS_TAB_CRUMB[activeTab]}</span>
+        </nav>
         {status ? <p className="text-sm text-emerald-600">{status}</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </header>
 
-      <Tabs defaultValue="profile" orientation="vertical" className="gap-6 md:grid md:grid-cols-[220px_minmax(0,1fr)]">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          const next = parseSettingsTab(value);
+          router.replace(`/settings?tab=${next}`, { scroll: false });
+        }}
+        orientation="vertical"
+        className="gap-6 md:grid md:grid-cols-[220px_minmax(0,1fr)]"
+      >
         <TabsList variant="line" className="w-full items-stretch justify-start rounded-2xl border bg-card p-2">
           <TabsTrigger value="profile">プロフィール</TabsTrigger>
           <TabsTrigger value="credit">プラン・使用量</TabsTrigger>
-          <TabsTrigger value="data">データ管理</TabsTrigger>
           <TabsTrigger value="app">アプリ情報</TabsTrigger>
         </TabsList>
 
@@ -463,7 +391,7 @@ export function SettingsPage() {
                   <div className="space-y-1">
                     <p className="text-sm font-medium">ペルソナ連携</p>
                     <p className="text-sm text-muted-foreground">
-                      URL登録やキーワード承認はペルソナ専用ページにまとめました。ここでは入口だけ管理できます。
+                      投稿 URL の入口はここでも保存できます。My Taboo や軌跡の再分析は「Identity」タブ、スタンスメモや NG の細かい編集は「Ghost」ページへどうぞ。
                     </p>
                   </div>
 
@@ -493,9 +421,18 @@ export function SettingsPage() {
                       保存する
                     </Button>
                   </div>
-                  <Link href="/identity" className="inline-flex">
-                    <Button>戻る</Button>
-                  </Link>
+                  <div className="flex flex-wrap gap-2">
+                    <Link href="/identity" className="inline-flex">
+                      <Button type="button" variant="secondary">
+                        Identity ページへ
+                      </Button>
+                    </Link>
+                    <Link href="/settings/ghost" className="inline-flex">
+                      <Button type="button" variant="outline">
+                        Ghost（詳細）
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -505,7 +442,7 @@ export function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>プラン・使用量</CardTitle>
-                <CardDescription>現在の契約状態と仮説検証量の目安を確認できます。</CardDescription>
+                <CardDescription>現在の契約状態とConcept Brief生成量の目安を確認できます。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
                 <div className="flex flex-wrap items-center gap-3">
@@ -520,7 +457,7 @@ export function SettingsPage() {
                 </div>
 
                 <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  次回の自動付与や決済履歴は今後ここに追加予定です。まずはプランページから検証量を管理できます。
+                  次回の自動付与や決済履歴は今後ここに追加予定です。まずはプランページから生成量を管理できます。
                 </div>
 
                 <Link href="/plans" className="inline-flex">
@@ -529,70 +466,6 @@ export function SettingsPage() {
                     保存する
                   </Button>
                 </Link>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="data">
-            <Card>
-              <CardHeader>
-                <CardTitle>データ管理</CardTitle>
-                <CardDescription>市場反応ログを持ち出したり、危険な操作をここから管理します。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">NGワード設定</p>
-                    <p className="text-sm text-muted-foreground">
-                      アプリ全体で避けたい語句をルールとして保存します。発信案生成時の禁止表現として反映されます。
-                    </p>
-                  </div>
-
-                  <Textarea
-                    value={ngRawDraft}
-                    onChange={(e) => setNgRawDraft(e.target.value)}
-                    placeholder={"例:\nマジで\n〜っす\n炎上"}
-                    className="min-h-28 font-mono text-sm"
-                  />
-
-                  {ghostSettings && ghostSettings.ngWords.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {ghostSettings.ngWords.map((word) => (
-                        <Badge key={word} variant="outline" className="rounded-full px-3 py-1">
-                          {word}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <Button variant="outline" onClick={() => void handleSaveNgWords()}>
-                    保存する
-                  </Button>
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <Button variant="outline" onClick={() => void handleExportCsv()}>
-                    <Download className="mr-1 size-4" />
-                    保存する
-                  </Button>
-                  <Button variant="outline" onClick={() => void handleResetArchive()} disabled={resetting}>
-                    <RefreshCcw className="mr-1 size-4" />
-                    保存する
-                  </Button>
-                </div>
-
-                <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
-                  <div className="flex items-start gap-3">
-                    <ShieldAlert className="mt-0.5 size-5 text-destructive" />
-                    <div className="space-y-2">
-                      <p className="font-medium text-destructive">危険な操作</p>
-                      <p className="text-sm text-muted-foreground">この操作は準備中です。保存して管理してください。</p>
-                      <Button variant="destructive" disabled>
-                        保存する
-                      </Button>
-                    </div>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </TabsContent>

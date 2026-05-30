@@ -13,9 +13,10 @@ import { getArchiveOverview, getGhostSettings, getIdentityProfile, listGeneratio
 const ANTI_PERSONA_PREFIX = "anti_persona";
 
 const ANTI_PERSONA_LABELS = {
-  avoid_phrases: "絶対に避ける言い回し",
-  hated_success_patterns: "嫌いな成功法則",
-  intolerable_injustice: "許せない不条理",
+  my_aesthetic: "My Taboo（私の美学）",
+  avoid_phrases: "使いたくない言葉",
+  hated_success_patterns: "やりたくない戦い方",
+  intolerable_injustice: "変えたい現状",
 } as const;
 
 const personaSchema = z.object({

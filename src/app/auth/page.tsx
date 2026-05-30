@@ -31,7 +31,10 @@ export default function AuthPage() {
   }, [loading, next, router, user]);
 
   useEffect(() => {
-    startLogin();
+    const timer = window.setTimeout(() => {
+      startLogin();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [startLogin]);
 
   return (

@@ -109,12 +109,12 @@ export function buildIdentityPromptBlock(identity: IdentityPromptInput): string 
   const importantKeywords = keywords.slice(0, 5);
 
   return [
-    "あなたは以下のDNAを持つ起業家の分身です。常にこのIdentityを優先してください。",
+    "あなたは以下のIdentityを持つ起業家の分身です。常にこの前提を優先してください。",
     `称号: ${identity.currentProphecy || "平均的な起業家"}`,
-    importantAxis.length > 0 ? `DNA軸（重要）:\n${importantAxis.map((line) => `- ${line}`).join("\n")}` : "DNA軸: 未設定",
+    importantAxis.length > 0 ? `Identity軸（重要）:\n${importantAxis.map((line) => `- ${line}`).join("\n")}` : "Identity軸: 未設定",
     importantKeywords.length > 0 ? `Identityキーワード（重要）: ${importantKeywords.join("、")}` : "Identityキーワード: 未設定",
     summary !== "" ? `Identity要約: ${summary}` : "Identity要約: 未設定",
-    "出力時は、上記DNAから外れる表現を避け、語り口の一貫性を守ること。",
+    "出力時は、上記Identityから外れる表現を避け、語り口の一貫性を守ること。",
   ].join("\n");
 }
 

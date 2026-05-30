@@ -5,6 +5,16 @@ export type QuickFeedback = "hot" | "cold" | null;
 export type GenerationMode = "single" | "series";
 export type PersonaStatus = "empty" | "draft" | "approved";
 export type RoadmapSeriesStatus = "active" | "hot" | "archived";
+export type ConceptBrief = {
+  oneLiner: string;
+  audience: string;
+  pain: string;
+  valueProposition: string;
+  whyNow: string;
+  whyMe: string;
+  mvp: string;
+  elevatorPitch: string;
+};
 export type IdentityFieldBufferSeriesSummary = {
   seriesId: string;
   pendingCount: number;
@@ -69,6 +79,7 @@ export type GenerationSeriesRecord = {
   speedMode?: "flash" | "pro";
   adviceHint?: string | null;
   ghostWhisper?: string | null;
+  conceptBrief?: ConceptBrief | null;
   quickFeedback?: QuickFeedback;
   memoryTags?: string[];
   items: GenerationSeriesItemRecord[];

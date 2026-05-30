@@ -6,5 +6,5 @@ export const metadata: Metadata = {
 };
 
 export default function GhostPage() {
-  redirect("/identity/ghost");
+  redirect("/settings/ghost");
 }

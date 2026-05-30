@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase/client";
 import type {
   ArchiveInsights,
   ArchiveOverview,
+  ConceptBrief,
   CreditSummary,
   GenerationRecord,
   GenerationSeriesItemRecord,
@@ -153,6 +154,7 @@ export type GenerateSeriesItem = {
 
 export type GenerateSeriesResponse = {
   seriesTitle: string;
+  conceptBrief: ConceptBrief;
   items: GenerateSeriesItem[];
   adviceHint?: string;
   ghostWhisper?: string;
@@ -384,6 +386,37 @@ export async function patchSeriesItemRecord(
   });
   notifyDataSync();
   return data.row;
+}
+
+export async function patchSeriesConceptBrief(
+  id: string,
+  conceptBrief: ConceptBrief,
+): Promise<GenerationSeriesRecord> {
+  await ensureDemoWorkspace();
+  const data = await requestJson<{ row: GenerationSeriesRecord }>(`/api/archive/series/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ conceptBrief }),
+  });
+  notifyDataSync();
+  return data.row;
+}
+
+export async function transcribeAudioFile(audio: File): Promise<{ text: string }> {
+  const accessToken = await getAccessToken();
+  const formData = new FormData();
+  formData.set("audio", audio);
+  const response = await fetch("/api/transcribe", {
+    method: "POST",
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: formData,
+  });
+  const data = (await response.json()) as { text?: string; error?: string };
+  if (!response.ok) {
+    throw new Error(data.error ?? "音声文字起こしに失敗しました");
+  }
+  return { text: data.text ?? "" };
 }
 
 export async function appendIdentityFieldBufferEntry(payload: {

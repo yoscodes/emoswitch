@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Activity, Flame, History, Snowflake, Tags } from "lucide-react";
+import { Activity, FileText, Flame, History, Snowflake, Tags } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,13 +35,11 @@ import { sortSeriesLikeItemsBySlotOrder } from "@/lib/series";
 import type { ArchiveOverview, GenerationSeriesRecord, QuickFeedback } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleDateString("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
+/** 進化の軌跡フィード用（1行に日付＋タイトル） */
+function formatSeriesFeedDate(iso: string) {
+  return new Date(iso).toLocaleDateString("ja-JP", {
+    month: "numeric",
+    day: "numeric",
   });
 }
 
@@ -195,8 +193,8 @@ export function RoadmapWorkspace() {
     setFeedbackGuide(null);
   }, [anchorItem?.id, anchorItem?.quickFeedback, anchorItem?.memo]);
 
-  const missionFinalGoal = ctxEffective?.finalGoal ?? "次の検証で、市場から確かな反応を取りにいく。";
-  const missionFirst = ctxEffective?.firstAction ?? "まずは最小の投稿またはDMで仮説を一文に落とす。";
+  const missionFinalGoal = ctxEffective?.finalGoal ?? "Concept Brief の前提を、次の行動で確かめる。";
+  const missionFirst = ctxEffective?.firstAction ?? "まずは最小の相手・場面に、コンセプトを一文で説明する。";
 
   const allHashtags = useMemo(() => {
     const set = new Set<string>();
@@ -285,7 +283,7 @@ export function RoadmapWorkspace() {
   const mentorCards =
     activeSeries?.adviceHint?.trim() ? (
       <div className="space-y-3">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">メンター（作戦遂行中）</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">メンター（コンセプト実行中）</p>
         <div className="rounded-xl border border-sky-200/70 bg-sky-50/95 p-3 text-sm dark:border-sky-900/50 dark:bg-sky-950/30">
           <p className="text-[10px] font-semibold text-sky-900 dark:text-sky-100">メンター・メモ</p>
           <p className="mt-1 leading-relaxed text-sky-950/90 dark:text-sky-50/90">{activeSeries.adviceHint}</p>
@@ -294,30 +292,30 @@ export function RoadmapWorkspace() {
     ) : null;
 
   return (
-    <div className="relative mx-auto w-full max-w-[2200px] space-y-6 px-4 py-8 pb-28 md:px-6 xl:flex xl:h-[calc(100vh-4rem)] xl:flex-col xl:overflow-hidden xl:px-8 xl:pb-6 2xl:px-10">
-      <header className="space-y-2">
+    <div className="relative mx-auto w-full max-w-[2200px] space-y-6 px-4 py-8 pb-28 md:px-6 xl:flex xl:h-[calc(100vh-4rem)] xl:flex-col xl:gap-6 xl:space-y-0 xl:overflow-hidden xl:px-8 xl:pb-6 2xl:px-10">
+      <header className="shrink-0 space-y-2">
         <div>
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Roadmap</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            過去の反省を参照しながら、現在の作戦を実行し、検証結果を記録します。
+            Concept Brief をもとに、最初の3アクションと次に確かめる前提を管理します。
           </p>
         </div>
       </header>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? <p className="shrink-0 text-sm text-destructive">{error}</p> : null}
 
       {!activeSeries ? (
         <Card>
           <CardContent className="space-y-4 py-12 text-center">
             <p className="text-muted-foreground">
-              まだアクティブな作戦がありません。{" "}
+              まだアクティブなコンセプトがありません。{" "}
               <Link href="/lab" className="font-medium text-primary underline-offset-4 hover:underline">
                 Lab で生成
               </Link>
               し、モーダルから「Roadmap にデプロイする」を押すとここに展開されます。
             </p>
             <p className="text-xs text-muted-foreground">
-              ポートフォリオ閲覧用に、Vault に連載サンプルを載せることもできます（あなたのアカウントに保存されます）。
+              ポートフォリオ閲覧用に、サンプルの実行プランを載せることもできます（あなたのアカウントに保存されます）。
             </p>
             <Button
               type="button"
@@ -342,15 +340,15 @@ export function RoadmapWorkspace() {
                 })();
               }}
             >
-              {sampleSeedBusy ? "読み込み中…" : "サンプル作戦を Vault に読み込む"}
+              {sampleSeedBusy ? "読み込み中…" : "サンプル実行プランを読み込む"}
             </Button>
           </CardContent>
         </Card>
       ) : (
         <>
           {/* 1. Current guidance strip */}
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-background/85 px-3 py-2 text-sm">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Mission</span>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-background/85 px-3 py-2 text-sm">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Next Premise</span>
             <span className="min-w-0 flex-1 truncate font-semibold text-foreground" title={missionFinalGoal}>
               {missionFinalGoal}
             </span>
@@ -367,20 +365,53 @@ export function RoadmapWorkspace() {
             ) : null}
           </div>
 
-          <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,0.68fr)_minmax(0,0.32fr)] xl:overflow-hidden">
-            {/* Left: active protocol */}
-            <div className="space-y-6 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
+          {activeSeries.conceptBrief ? (
+            <Card className="shrink-0 border-violet-200/70 bg-violet-50/70 shadow-sm dark:border-violet-900/45 dark:bg-violet-950/20">
+              <CardContent className="grid gap-4 py-4 md:grid-cols-[1.15fr_0.85fr]">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <FileText className="size-4 text-violet-700 dark:text-violet-200" />
+                    <p className="text-xs font-semibold uppercase tracking-wide text-violet-800/80 dark:text-violet-200/80">
+                      Concept Brief
+                    </p>
+                  </div>
+                  <h2 className="text-lg font-bold leading-snug text-violet-950 dark:text-violet-50">
+                    {activeSeries.conceptBrief.oneLiner}
+                  </h2>
+                  <p className="text-sm leading-relaxed text-violet-950/85 dark:text-violet-50/85">
+                    {activeSeries.conceptBrief.elevatorPitch}
+                  </p>
+                </div>
+                <div className="grid gap-2 text-xs sm:grid-cols-2 md:grid-cols-1">
+                  {[
+                    ["誰に", activeSeries.conceptBrief.audience],
+                    ["痛み", activeSeries.conceptBrief.pain],
+                    ["MVP", activeSeries.conceptBrief.mvp],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-violet-200/55 bg-background/70 px-3 py-2 dark:border-violet-900/35 dark:bg-background/55">
+                      <p className="text-[10px] font-semibold text-muted-foreground">{label}</p>
+                      <p className="mt-1 leading-relaxed text-foreground/90">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <div className="grid min-h-0 flex-1 gap-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-row xl:overflow-hidden">
+            {/* Left: active protocol — flex + min-h-0 so column scroll works (grid row auto-height breaks overflow) */}
+            <div className="space-y-6 xl:min-h-0 xl:min-w-0 xl:flex-[0.68] xl:overflow-y-auto xl:p-1">
               <Card>
                 <CardHeader>
                   <div className="flex items-center gap-2">
                     <Activity className="size-4 text-violet-600" />
-                    <p className="text-sm font-semibold">アクティブ・プロトコル</p>
+                    <p className="text-sm font-semibold">最初の3アクション</p>
                   </div>
                   <p className="text-xs text-muted-foreground">{activeSeries.title}</p>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div>
-                    <p className="text-xs font-semibold tracking-wide text-muted-foreground">アクションツリー</p>
+                    <p className="text-xs font-semibold tracking-wide text-muted-foreground">実行ツリー</p>
                     <ol className="mt-3 space-y-3 border-l-2 border-dashed border-border/60 pl-4">
                       <li className="relative">
                         <span className="absolute -left-[21px] top-1.5 size-2.5 rounded-full bg-violet-500 ring-4 ring-background" />
@@ -424,7 +455,7 @@ export function RoadmapWorkspace() {
                                   </Badge>
                                   <span className="text-xs text-muted-foreground">{item.slotLabel}</span>
                                   {verifiedHot ? (
-                                    <Badge className="rounded-full bg-emerald-600 text-[10px] text-white">検証🔥</Badge>
+                                    <Badge className="rounded-full bg-emerald-600 text-[10px] text-white">前進</Badge>
                                   ) : null}
                                 </div>
                                 {immediate ? (
@@ -438,7 +469,7 @@ export function RoadmapWorkspace() {
                                 {narrative ? (
                                   <details className="mt-2">
                                     <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                                      意図・背景を開く
+                                      確かめる前提を開く
                                     </summary>
                                     <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{narrative}</p>
                                   </details>
@@ -458,7 +489,7 @@ export function RoadmapWorkspace() {
                             className="mt-1 size-4 shrink-0 accent-fuchsia-600"
                           />
                           <div className="min-w-0 flex-1 text-sm text-muted-foreground">
-                            <span className="font-medium text-foreground">最終目標: </span>
+                            <span className="font-medium text-foreground">到達点: </span>
                             {missionFinalGoal}
                           </div>
                         </label>
@@ -469,7 +500,7 @@ export function RoadmapWorkspace() {
                   {(mentorCards || ctxEffective?.dnaAlignmentReason || ctxEffective?.protocolLines?.length) ? (
                     <section className="space-y-3 rounded-xl border border-border/40 bg-muted/20 p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        作戦の裏側（Reference）
+                        コンセプトの裏側（Reference）
                       </p>
 
                       {mentorCards ? <div className="xl:hidden">{mentorCards}</div> : null}
@@ -477,7 +508,7 @@ export function RoadmapWorkspace() {
                       {ctxEffective?.dnaAlignmentReason ? (
                         <details>
                           <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-                            Lab 共鳴メモ
+                            Identity 整合メモ
                           </summary>
                           <div className="mt-2 rounded-lg border border-border/40 bg-background/80 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
                             {ctxEffective.dnaAlignmentReason}
@@ -487,7 +518,7 @@ export function RoadmapWorkspace() {
 
                       <details>
                         <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-                          作戦詳細（生成本文）
+                          実行プラン詳細（生成本文）
                         </summary>
                         <div className="mt-2 space-y-3 rounded-lg border border-dashed bg-background/80 p-3">
                           {seriesItemsTimeline.map((item) => {
@@ -529,124 +560,149 @@ export function RoadmapWorkspace() {
               </Card>
             </div>
 
-            {/* Right: insight hub */}
-            <aside className="space-y-4 xl:min-h-0 xl:overflow-y-auto xl:pl-1">
-              <Card>
-                <CardHeader>
-                  <p className="text-sm font-semibold">検証フィードバック</p>
-                </CardHeader>
-                <CardContent className={cn("space-y-4 transition-opacity", feedbackSent && "opacity-80")}>
-                  {feedbackSent ? (
-                    <div className="rounded-lg border border-emerald-300/60 bg-emerald-50/80 px-3 py-2 text-xs font-medium text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-950/20 dark:text-emerald-200">
-                      ✅ 送信済み
+            {/* Right: 内省ゾーン（背景トーン + 実行メモは sticky で常時手元） */}
+            <aside
+              className={cn(
+                "space-y-4",
+                "xl:min-h-0 xl:min-w-0 xl:flex-[0.32] xl:max-h-full xl:overflow-y-auto xl:overflow-x-hidden",
+                "xl:rounded-xl xl:border xl:border-amber-200/40 xl:bg-amber-50/55 xl:px-3 xl:py-3 xl:shadow-sm",
+                "dark:xl:border-amber-900/35 dark:xl:bg-amber-950/25",
+              )}
+            >
+              <div className="xl:sticky xl:top-4 xl:z-20 xl:space-y-4 xl:bg-linear-to-b xl:from-amber-50/98 xl:via-amber-50/92 xl:to-amber-50/0 xl:pb-3 dark:xl:from-amber-950/98 dark:xl:via-amber-950/90 dark:xl:to-amber-950/0">
+                <Card className="border-border/70 shadow-sm dark:border-border/60">
+                  <CardHeader className="pb-2">
+                    <p className="text-sm font-semibold">コンセプト実行メモ</p>
+                  </CardHeader>
+                  <CardContent className={cn("space-y-4 transition-opacity", feedbackSent && "opacity-80")}>
+                    {feedbackSent ? (
+                      <div className="rounded-lg border border-emerald-300/60 bg-emerald-50/80 px-3 py-2 text-xs font-medium text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-950/20 dark:text-emerald-200">
+                        ✅ 送信済み
+                      </div>
+                    ) : null}
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-semibold text-foreground">前提の手応え</p>
+                      <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1">
+                        <button
+                          type="button"
+                          className={cn(
+                            "inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium transition-colors",
+                            quickFeedback === "hot"
+                              ? "bg-violet-600 text-white shadow-sm"
+                              : "text-muted-foreground hover:bg-background/70",
+                          )}
+                          disabled={feedbackSaving}
+                          onClick={() => {
+                            setQuickFeedback("hot");
+                            setFeedbackSent(false);
+                            setFeedbackGuide(null);
+                          }}
+                        >
+                          <Flame className="size-3.5" />
+                          前に進む
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(
+                            "inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium transition-colors",
+                            quickFeedback === "cold"
+                              ? "bg-violet-600 text-white shadow-sm"
+                              : "text-muted-foreground hover:bg-background/70",
+                          )}
+                          disabled={feedbackSaving}
+                          onClick={() => {
+                            setQuickFeedback("cold");
+                            setFeedbackSent(false);
+                            setFeedbackGuide(null);
+                          }}
+                        >
+                          <Snowflake className="size-3.5" />
+                          見直す
+                        </button>
+                      </div>
                     </div>
-                  ) : null}
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-semibold text-foreground">今の感触</p>
-                    <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1">
-                      <button
-                        type="button"
-                        className={cn(
-                          "inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium transition-colors",
-                          quickFeedback === "hot"
-                            ? "bg-violet-600 text-white shadow-sm"
-                            : "text-muted-foreground hover:bg-background/70",
-                        )}
-                        disabled={feedbackSaving}
-                        onClick={() => {
-                          setQuickFeedback("hot");
+                    <label className="block space-y-1.5">
+                      <span className="text-xs font-semibold text-foreground">次に確かめる前提・違和感（Identity へ還流）</span>
+                      <Textarea
+                        value={memoInput}
+                        onChange={(e) => {
+                          setMemoInput(e.target.value);
                           setFeedbackSent(false);
-                          setFeedbackGuide(null);
                         }}
-                      >
-                        <Flame className="size-3.5" />
-                        手応えあり
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          "inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium transition-colors",
-                          quickFeedback === "cold"
-                            ? "bg-violet-600 text-white shadow-sm"
-                            : "text-muted-foreground hover:bg-background/70",
-                        )}
-                        disabled={feedbackSaving}
-                        onClick={() => {
-                          setQuickFeedback("cold");
-                          setFeedbackSent(false);
-                          setFeedbackGuide(null);
-                        }}
-                      >
-                        <Snowflake className="size-3.5" />
-                        何か違う
-                      </button>
-                    </div>
-                  </div>
-                  <label className="block space-y-1.5">
-                    <span className="text-xs font-semibold text-foreground">想定と何が違ったか（Identity へ還流）</span>
-                    <Textarea
-                      value={memoInput}
-                      onChange={(e) => {
-                        setMemoInput(e.target.value);
-                        setFeedbackSent(false);
-                      }}
-                      className="min-h-[120px] border-border"
-                      placeholder="例: 避けるべき言い回しが刺さっていない。次回は「不安を煽る型」を外し、当事者の痛みを具体化する。"
-                    />
-                  </label>
-                  {feedbackGuide ? <p className="text-xs text-amber-600">{feedbackGuide}</p> : null}
-                  <Button
-                    type="button"
-                    className="w-full bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                    disabled={feedbackSaving || !anchorItem || feedbackSent}
-                    onClick={() => void saveFeedback()}
-                  >
-                    {feedbackSaving ? "送信中…" : feedbackSent ? "送信済み" : "結果をバッファへ送信"}
-                  </Button>
-                </CardContent>
-              </Card>
+                        className="min-h-[120px] border-border"
+                        placeholder="例: 顧客の痛みは合っていそう。ただ、MVPの届け方が重い。次は既存の知人1人に一文コンセプトだけ説明して反応を見る。"
+                      />
+                    </label>
+                    {feedbackGuide ? <p className="text-xs text-amber-600">{feedbackGuide}</p> : null}
+                    <Button
+                      type="button"
+                      className="w-full bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                      disabled={feedbackSaving || !anchorItem || feedbackSent}
+                      onClick={() => void saveFeedback()}
+                    >
+                      {feedbackSaving ? "送信中…" : feedbackSent ? "送信済み" : "実行メモをバッファへ送信"}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
 
-              <Card>
-                <CardHeader className="pb-3">
+              <Card className="border-border/60 bg-background/70 dark:bg-background/50">
+                <CardHeader className="space-y-0 pb-2 pt-3">
                   <div className="flex items-center gap-2">
-                    <History className="size-4" />
-                    <p className="text-sm font-semibold">進化の軌跡</p>
+                    <History className="size-3.5 text-muted-foreground" />
+                    <p className="text-xs font-semibold tracking-wide text-muted-foreground">Brief履歴</p>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <ul className="space-y-2">
+                <CardContent className="px-3 pb-3 pt-0">
+                  <ul className="space-y-1">
                     {archiveRows.map((row) => {
                       const hot = row.items.filter((i) => i.quickFeedback === "hot").length;
-                    const status = deriveRoadmapSeriesStatus(row, activeSeries?.id ?? null);
+                      const status = deriveRoadmapSeriesStatus(row, activeSeries?.id ?? null);
                       const pendingIdentityCount =
                         serverPendingBySeries[row.id] ?? identityBufferBySeries[row.id]?.total ?? 0;
-                    return (
+                      return (
                         <li key={`right-${row.id}`}>
                           <Link
                             href={`/roadmap?series=${row.id}`}
                             className={cn(
-                              "block rounded-xl border bg-card/60 p-3 transition-colors hover:bg-card",
-                              status === "active" && "ring-2 ring-violet-500/40",
+                              "flex flex-col gap-0.5 rounded-md border border-border/45 bg-card/50 px-2 py-1.5 transition-colors hover:bg-card/90",
+                              status === "active" && "ring-1 ring-violet-500/50",
                             )}
                           >
-                            <p className="truncate text-xs font-medium">{row.title}</p>
-                            <div className="mt-1 flex items-center gap-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <time
+                                dateTime={row.createdAt}
+                                className="shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                              >
+                                {formatSeriesFeedDate(row.createdAt)}
+                              </time>
+                              <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                                {row.title}
+                              </span>
+                              <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums text-muted-foreground">
+                                <span className="leading-none" aria-hidden>
+                                  🔥
+                                </span>
+                                {hot}/{row.items.length}
+                              </span>
                               <Badge
                                 className={cn(
-                                  "rounded-full text-[9px] text-white",
+                                  "h-5 shrink-0 rounded px-1 py-0 text-[8px] font-semibold leading-none text-white",
                                   status === "active" && "bg-violet-600",
                                   status === "hot" && "bg-rose-500",
                                   status === "archived" && "bg-zinc-500",
                                 )}
                               >
-                                {status === "active" ? "ACTIVE" : status === "hot" ? "HOT" : "ARCHIVED"}
-                              </Badge>
-                              <Badge variant="outline" className="rounded-full text-[9px]">
-                                🔥 {hot}/{row.items.length}
+                                {status === "active" ? "ACT" : status === "hot" ? "HOT" : "ARC"}
                               </Badge>
                             </div>
-                            <p className="mt-1 text-[10px] text-muted-foreground">
-                              {pendingIdentityCount > 0 ? `DNA未反映 ${pendingIdentityCount}件` : "DNA還流: 完了"}
+                            {row.conceptBrief?.oneLiner ? (
+                              <p className="truncate text-[9px] text-muted-foreground">
+                                {row.conceptBrief.oneLiner}
+                              </p>
+                            ) : null}
+                            <p className="truncate text-[9px] text-muted-foreground">
+                              {pendingIdentityCount > 0 ? `Identity未反映 ${pendingIdentityCount}件` : "実行メモ還流: 完了"}
                             </p>
                           </Link>
                         </li>

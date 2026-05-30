@@ -5,8 +5,8 @@ import { DemoModeBanner } from "@/components/demo-mode-banner";
 
 export const metadata: Metadata = {
   title: {
-    template: "%s | Identity DNA",
-    default: "Identity DNA",
+    template: "%s | Concept Forge",
+    default: "Concept Forge",
   },
 };
 

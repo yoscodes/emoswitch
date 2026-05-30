@@ -1,6 +1,11 @@
 import type { User } from "@supabase/supabase-js";
 import type { EmotionTone } from "@/lib/emotions";
 import {
+  embedConceptBriefInAdviceHint,
+  extractConceptBriefFromAdviceHint,
+  stripConceptBriefFromAdviceHint,
+} from "@/lib/concept-brief";
+import {
   buildArchiveInsights,
   type ArchiveInsightSeriesInput,
   type ArchiveInsightSingleInput,
@@ -10,6 +15,7 @@ import { compareSeriesSlotKey, getSeriesSlotLabel, type SeriesSlotKey } from "@/
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type {
   ArchiveOverview,
+  ConceptBrief,
   CreditSummary,
   GenerationRecord,
   GenerationSeriesItemRecord,
@@ -83,6 +89,7 @@ type DbSeriesRow = {
   speed_mode: "flash" | "pro" | null;
   advice_hint: string | null;
   ghost_whisper: string | null;
+  concept_brief: ConceptBrief | null;
   quick_feedback: QuickFeedback;
   memory_tags: string[] | null;
   deleted_at: string | null;
@@ -141,6 +148,7 @@ type DbHypothesisRow = {
     memory_tags?: string[];
     title?: string;
     ghost_whisper?: string | null;
+    concept_brief?: ConceptBrief | null;
     items?: Array<{
       id?: string;
       slot_key?: SeriesSlotKey;
@@ -412,6 +420,7 @@ const DEMO_SERIES: Array<{
   speed_mode: "flash" | "pro";
   advice_hint: string | null;
   ghost_whisper: string | null;
+  concept_brief?: ConceptBrief | null;
   quick_feedback: QuickFeedback;
   memory_tags: string[];
   created_at: string;
@@ -518,7 +527,7 @@ function mapGeneration(row: DbGenerationRow): GenerationRecord {
     selectedIndex: row.selected_index,
     likes: row.likes,
     memo: row.memo,
-    adviceHint: row.advice_hint,
+    adviceHint: stripConceptBriefFromAdviceHint(row.advice_hint),
     quickFeedback: row.quick_feedback,
     memoryTags: row.memory_tags ?? [],
   };
@@ -565,8 +574,9 @@ function mapSeries(row: DbSeriesRow, items: DbSeriesItemRow[]): GenerationSeries
     emotion: row.emotion,
     intensity: row.intensity,
     speedMode: row.speed_mode ?? undefined,
-    adviceHint: row.advice_hint,
+    adviceHint: stripConceptBriefFromAdviceHint(row.advice_hint),
     ghostWhisper: row.ghost_whisper,
+    conceptBrief: row.concept_brief ?? extractConceptBriefFromAdviceHint(row.advice_hint),
     quickFeedback: row.quick_feedback ?? deriveSeriesFeedback(mappedItems),
     memoryTags: row.memory_tags ?? [],
     items: mappedItems,
@@ -625,7 +635,7 @@ function mapSingleFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): G
     selectedIndex: typeof output.selected_index === "number" ? output.selected_index : null,
     likes: deriveLikesFromLogs(logs),
     memo: deriveMemoFromLogs(logs),
-    adviceHint: output.advice_hint ?? null,
+    adviceHint: stripConceptBriefFromAdviceHint(output.advice_hint),
     quickFeedback: deriveQuickFeedbackFromLogs(logs),
     memoryTags: asArray(output.memory_tags),
   };
@@ -686,8 +696,9 @@ function mapSeriesFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): G
     emotion: strategy.emotion ?? "empathy",
     intensity: strategy.intensity ?? 50,
     speedMode: strategy.speed_mode ?? undefined,
-    adviceHint: output.advice_hint ?? null,
+    adviceHint: stripConceptBriefFromAdviceHint(output.advice_hint),
     ghostWhisper: output.ghost_whisper ?? null,
+    conceptBrief: output.concept_brief ?? extractConceptBriefFromAdviceHint(output.advice_hint),
     quickFeedback: deriveQuickFeedbackFromLogs(logs) ?? deriveSeriesFeedback(items),
     memoryTags: asArray(output.memory_tags),
     items,
@@ -1019,6 +1030,7 @@ export async function backfillNewSchemaFromLegacy(userId?: string): Promise<{ up
             title: row.title,
             advice_hint: row.adviceHint ?? null,
             ghost_whisper: row.ghostWhisper ?? null,
+            concept_brief: row.conceptBrief ?? null,
             memory_tags: row.memoryTags ?? [],
             items: row.items.map((item) => ({
               id: item.id,
@@ -1176,7 +1188,7 @@ async function requireGenerationSeriesById(id: string, userId?: string): Promise
     supabaseAdmin
       .from("generation_series")
       .select(
-        "id, created_at, title, source_draft, emotion, intensity, speed_mode, advice_hint, ghost_whisper, quick_feedback, memory_tags, deleted_at",
+        "id, created_at, title, source_draft, emotion, intensity, speed_mode, advice_hint, ghost_whisper, concept_brief, quick_feedback, memory_tags, deleted_at",
       )
       .eq("id", id)
       .eq("user_id", scopedUserId)
@@ -1482,7 +1494,7 @@ async function loadLegacyGenerationSeriesRecords(scopedUserId: string): Promise<
     supabaseAdmin
       .from("generation_series")
       .select(
-        "id, created_at, title, source_draft, emotion, intensity, speed_mode, advice_hint, ghost_whisper, quick_feedback, memory_tags, deleted_at",
+        "id, created_at, title, source_draft, emotion, intensity, speed_mode, advice_hint, ghost_whisper, concept_brief, quick_feedback, memory_tags, deleted_at",
       )
       .eq("user_id", scopedUserId)
       .is("deleted_at", null)
@@ -1748,6 +1760,7 @@ export async function createGenerationSeries(
   userId?: string,
 ): Promise<GenerationSeriesRecord> {
   const scopedUserId = await resolveScopedUserId(userId);
+  const adviceHintWithBrief = embedConceptBriefInAdviceHint(input.adviceHint, input.conceptBrief);
   const { data, error } = await supabaseAdmin.rpc("create_generation_series_with_credit", {
     p_user_id: scopedUserId,
     p_title: input.title,
@@ -1756,7 +1769,7 @@ export async function createGenerationSeries(
     p_intensity: input.intensity,
     p_speed_mode: input.speedMode ?? null,
     p_items: input.items,
-    p_advice_hint: input.adviceHint ?? null,
+    p_advice_hint: adviceHintWithBrief,
     p_ghost_whisper: input.ghostWhisper ?? null,
     p_memory_tags: input.memoryTags ?? [],
   });
@@ -1768,8 +1781,19 @@ export async function createGenerationSeries(
     throw error;
   }
 
+  const seriesId = String(data);
+  if (input.conceptBrief) {
+    const { error: conceptError } = await supabaseAdmin
+      .from("generation_series")
+      .update({ concept_brief: input.conceptBrief })
+      .eq("id", seriesId)
+      .eq("user_id", scopedUserId)
+      .is("deleted_at", null);
+    if (conceptError) throw conceptError;
+  }
+
   clearArchiveOverviewCache();
-  return requireGenerationSeriesById(String(data), scopedUserId);
+  return requireGenerationSeriesById(seriesId, scopedUserId);
 }
 
 export async function seedArchiveSampleGenerations(userId?: string): Promise<{ insertedCount: number }> {
@@ -1824,6 +1848,7 @@ export async function seedArchiveSampleGenerations(userId?: string): Promise<{ i
     speed_mode: row.speed_mode,
     advice_hint: row.advice_hint,
     ghost_whisper: row.ghost_whisper,
+    concept_brief: row.concept_brief ?? null,
     quick_feedback: row.quick_feedback,
     memory_tags: row.memory_tags,
     created_at: row.created_at,
@@ -1977,6 +2002,62 @@ export async function updateGenerationSeriesItem(
   return requireGenerationSeriesById(currentRow.series_id, scopedUserId).then(
     (series) => series.items.find((item) => item.id === id) as GenerationSeriesItemRecord,
   );
+}
+
+export async function updateGenerationSeriesConceptBrief(
+  id: string,
+  conceptBrief: ConceptBrief,
+  userId?: string,
+): Promise<GenerationSeriesRecord> {
+  const scopedUserId = await resolveScopedUserId(userId);
+  const { data: currentRow, error: currentError } = await supabaseAdmin
+    .from("generation_series")
+    .select("advice_hint")
+    .eq("id", id)
+    .eq("user_id", scopedUserId)
+    .is("deleted_at", null)
+    .single<Pick<DbSeriesRow, "advice_hint">>();
+
+  if (currentError) throw currentError;
+
+  const nextAdviceHint = embedConceptBriefInAdviceHint(currentRow.advice_hint, conceptBrief);
+  const { error } = await supabaseAdmin
+    .from("generation_series")
+    .update({
+      advice_hint: nextAdviceHint,
+      concept_brief: conceptBrief,
+    })
+    .eq("id", id)
+    .eq("user_id", scopedUserId)
+    .is("deleted_at", null);
+
+  if (error) throw error;
+
+  const { data: hypothesisRow } = await supabaseAdmin
+    .from("hypotheses")
+    .select("id, output_content")
+    .eq("user_id", scopedUserId)
+    .eq("legacy_source_type", "series")
+    .eq("legacy_source_id", id)
+    .is("deleted_at", null)
+    .maybeSingle<Pick<DbHypothesisRow, "id" | "output_content">>();
+
+  if (hypothesisRow) {
+    await supabaseAdmin
+      .from("hypotheses")
+      .update({
+        output_content: {
+          ...(hypothesisRow.output_content ?? {}),
+          concept_brief: conceptBrief,
+          advice_hint: stripConceptBriefFromAdviceHint(nextAdviceHint),
+        },
+      })
+      .eq("id", hypothesisRow.id)
+      .eq("user_id", scopedUserId);
+  }
+
+  clearArchiveOverviewCache();
+  return requireGenerationSeriesById(id, scopedUserId);
 }
 
 export async function appendIdentityFieldBufferEntry(

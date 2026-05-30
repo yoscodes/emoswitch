@@ -68,6 +68,16 @@ const bodySchema = z.object({
 
 const actionPlanResultSchema = z.object({
   seriesTitle: z.string().describe("アクションプラン全体の短い見出し（和名）"),
+  conceptBrief: z.object({
+    oneLiner: z.string().min(8).max(120).describe("事業案を一言で説明するコンセプト"),
+    audience: z.string().min(8).max(180).describe("誰に向けた事業か"),
+    pain: z.string().min(8).max(180).describe("扱う痛み・未充足・違和感"),
+    valueProposition: z.string().min(8).max(220).describe("どんな価値を提供するか"),
+    whyNow: z.string().min(4).max(180).describe("なぜ今この構想を形にするのか"),
+    whyMe: z.string().min(4).max(180).describe("なぜこのユーザーがやる意味があるのか"),
+    mvp: z.string().min(8).max(180).describe("最初に届ける最小の価値・MVP"),
+    elevatorPitch: z.string().min(20).max(280).describe("30秒で話せる説明文"),
+  }),
   items: z
     .array(
       z.object({
@@ -215,8 +225,8 @@ export async function POST(request: Request) {
     const rootsSyncLine = isVanilla
       ? "ROOTS同期: 比較（Vanilla）モードのため、個人ログの還流は適用しない。"
       : billing.rootsSyncPriority === "high"
-        ? "ROOTS同期: 高優先でDNAへ還流。市場反応ログを優先的に学習し、次回生成へ強く反映する。"
-        : "ROOTS同期: 標準優先度でDNAへ還流。";
+        ? "ROOTS同期: 高優先でIdentityへ還流。市場反応ログを優先的に学習し、次回生成へ強く反映する。"
+        : "ROOTS同期: 標準優先度でIdentityへ還流。";
     const survivalSimulationLine = isVanilla
       ? "生存シミュレーション: 比較モードのため、個人の負荷前提は使わず汎用助言に寄せる。"
       : billing.survivalSimulationEnabled
@@ -307,19 +317,22 @@ export async function POST(request: Request) {
       "STEP の body で描く検証の構想は大きくてよいが、immediateAction だけは常に『48時間以内に着手し、最初の完了までの負担が軽い』こと。本文の壮大さと immediateAction の小ささのギャップは推奨する。",
     ].join("\n");
     const actionPlanModeLine = [
-      "今回はアクションプラン（3ステップの行動計画）モードです。",
-      "seriesTitle と items を返すこと。",
+      "今回は Concept Brief + 実行プラン生成モードです。",
+      "seriesTitle、conceptBrief、items を返すこと。",
+      "conceptBrief は、事業の種を人に説明できる1枚の Brief として書く。コピー案ではなく、誰に何をなぜ届ける事業なのかを固定する。",
+      "conceptBrief.oneLiner は、専門用語を避けた一言コンセプトにする。",
+      "conceptBrief.elevatorPitch は、初対面の相手に30秒で説明する自然な日本語にする。",
       "items は次の順番で必ず3本返すこと。",
       buildUsagePurposeStepPlanPromptBlock(purposeKey),
-      "各 body には、そのステップの役割に沿って、何を市場に見せ何を検証するかをまとめる。",
-      "communication（伝達・コピー）用途でも、キャッチコピーだけで終わらせず、どのチャネルで誰に何を出すかまで必ず含める。",
+      "各 body には、Concept Brief を前に進めるために何を確かめるかをまとめる。",
+      "communication（伝達・コピー）用途でも、キャッチコピーだけで終わらせず、誰に何を伝え、どの前提を確かめるかまで必ず含める。",
       "immediateAction は必須。今日〜48時間以内に着手でき、最初の一段まで完了し得る極小の具体行動のみ。種メモの不安・リスクを踏み越えない（直後の【すぐやること＝極小アクション】に必ず従う）。動詞で始める短文。伝達モードでも必ず1本ずつ埋める（コピー案だけで終わらせない）。",
-      "validationMetric には、このステップで成功とみなす検証反応を短く具体的に書くこと（任意なら省略可）。",
+      "validationMetric には、このステップで確かめるべき前提や判断材料を短く具体的に書くこと（任意なら省略可）。",
     ].join("\n");
     const identityBlock = isVanilla
       ? [
           "【Identity Filter: OFF / 比較用 Vanilla】",
-          "利用者固有のDNA・ペルソナ・個人的禁則・過去の成功メモの踏襲は禁止。",
+          "利用者固有のペルソナ・Identity・個人的禁則・過去の成功メモの踏襲は禁止。",
           "抽象的で安全、どの業界にも当てはまる『ビジネス啓発記事風』の一般論に寄せる。",
           "固有の痛み・価値観・差別化の芯には踏み込まず、テンプレート的な助言に留める。",
         ].join("\n")
@@ -408,6 +421,7 @@ export async function POST(request: Request) {
     ]);
     return Response.json({
       seriesTitle: planObject.seriesTitle,
+      conceptBrief: planObject.conceptBrief,
       items: normalizedItems,
       adviceHint: planObject.adviceHint,
       ghostWhisper: planObject.ghostWhisper,

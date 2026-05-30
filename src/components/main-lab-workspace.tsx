@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   useCallback,
   useEffect,
@@ -17,12 +16,13 @@ import {
   Box,
   CircleHelp,
   Compass,
-  Filter,
   Heart,
   Loader2,
   Megaphone,
+  Mic,
   PenLine,
   MoveRight,
+  Save,
   Swords,
   X,
 } from "lucide-react";
@@ -39,14 +39,16 @@ import {
   fetchUserProfile,
   generateTriple,
   organizeScrapDraft,
+  patchSeriesConceptBrief,
   saveGenerationRecord,
+  transcribeAudioFile,
   type GenerateSeriesItem,
   type GenerateSeriesResponse,
   type StrategyGoal,
   type UsagePurpose,
 } from "@/lib/api-client";
 import { STRATEGY_GOAL_UI_LABELS } from "@/lib/strategy-goal";
-import type { GenerationSeriesRecord } from "@/lib/types";
+import type { ConceptBrief, GenerationSeriesRecord } from "@/lib/types";
 import { EMOTION_LABELS, type EmotionTone } from "@/lib/emotions";
 import { DATA_SYNC_EVENT } from "@/lib/data-sync";
 import {
@@ -75,7 +77,7 @@ import { playSwitchClick } from "@/lib/switch-sound";
 import { cn } from "@/lib/utils";
 
 const CANVAS_PLACEHOLDER =
-  "整理せず、そのままの言葉で。あとから下のヒントで解像度を上げられます";
+  "整理せず、そのままの言葉で。解像度シートであとから磨けます";
 
 /** scrap-organize API と揃える（これ未満ではゴースト抽出を呼ばない） */
 const SCRAP_GHOST_MIN_CHARS = 80;
@@ -120,7 +122,7 @@ function LabSheetHintButton({
 
   useEffect(() => {
     if (!open) return;
-    updatePosition();
+    const frame = window.requestAnimationFrame(updatePosition);
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
@@ -139,6 +141,7 @@ function LabSheetHintButton({
       setOpen(false);
     }
     return () => {
+      window.cancelAnimationFrame(frame);
       window.removeEventListener("keydown", onEsc);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
@@ -195,13 +198,6 @@ function LabSheetHintButton({
     </>
   );
 }
-
-/** Identity OFF 時に見せる「Vanilla」一般論のイメージ（同一 SEED の再生成ではない比較用コピー） */
-const VANILLA_COMPARISON_ACTION_PLAN: readonly string[] = [
-  "STEP 1では課題仮説を一言にし、最小の投稿または広告枠で初速の反応だけを取りにいきます。",
-  "STEP 2では反応ログを眺め、問いと訴求を1点だけ修正して同じチャネルで再テストします。",
-  "STEP 3では得られた学びを短く言語化し、次の投資判断に回すメモを1枚残します。",
-];
 
 const ENERGY_RGB_BY_EMOTION: Record<EmotionTone, string> = {
   empathy: "236, 72, 153",
@@ -567,6 +563,28 @@ function buildOpportunitySeed(params: {
 
 type SeriesResult = GenerateSeriesResponse;
 
+type ConceptBriefTransformKey = "customer" | "investor" | "cofounder" | "lp";
+
+const CONCEPT_BRIEF_TRANSFORM_LABELS: Record<ConceptBriefTransformKey, string> = {
+  customer: "顧客向け説明",
+  investor: "投資家向け説明",
+  cofounder: "共同創業者向け説明",
+  lp: "LP見出し",
+};
+
+function buildConceptBriefTransform(brief: ConceptBrief, key: ConceptBriefTransformKey): string {
+  if (key === "customer") {
+    return `${brief.audience} の「${brief.pain}」を、${brief.valueProposition} で解決します。まずは ${brief.mvp} から体験できます。`;
+  }
+  if (key === "investor") {
+    return `${brief.oneLiner}。対象は ${brief.audience}。未充足は ${brief.pain} で、初期MVPは ${brief.mvp}。今取り組む理由は ${brief.whyNow} です。`;
+  }
+  if (key === "cofounder") {
+    return `${brief.whyMe} という必然性を起点に、${brief.audience} の課題を一緒に形にしたいです。まず ${brief.mvp} で価値の核を確かめます。`;
+  }
+  return `${brief.oneLiner}\n${brief.valueProposition}`;
+}
+
 type SeedGhostSlots = {
   audience: string;
   pain: string;
@@ -612,6 +630,7 @@ function SeedGhostPick({
 
 export function MainLabWorkspace() {
   const router = useRouter();
+  const audioInputRef = useRef<HTMLInputElement | null>(null);
   const hasAppliedInitialOverridesRef = useRef(false);
   const prevHasLiveOutputRef = useRef(false);
   const [draft, setDraft] = useState("");
@@ -629,6 +648,10 @@ export function MainLabWorkspace() {
 
   const [seriesTitle, setSeriesTitle] = useState("");
   const [seriesItems, setSeriesItems] = useState<GenerateSeriesItem[]>([]);
+  const [conceptBrief, setConceptBrief] = useState<ConceptBrief | null>(null);
+  const [briefDraft, setBriefDraft] = useState<ConceptBrief | null>(null);
+  const [briefSaving, setBriefSaving] = useState(false);
+  const [audioTranscribing, setAudioTranscribing] = useState(false);
   const [personaKeywords, setPersonaKeywords] = useState<string[]>([]);
   const [personaSummary, setPersonaSummary] = useState("");
   const [personaStatus, setPersonaStatus] = useState<
@@ -644,10 +667,6 @@ export function MainLabWorkspace() {
     null,
   );
   const [resultsModalOpen, setResultsModalOpen] = useState(false);
-  const [identityFilterOn, setIdentityFilterOn] = useState(true);
-  const [lastGenerationIdentityMode, setLastGenerationIdentityMode] = useState<
-    "rich" | "vanilla"
-  >("rich");
   const [lastSavedSeries, setLastSavedSeries] =
     useState<GenerationSeriesRecord | null>(null);
   const [seedGhost, setSeedGhost] = useState<SeedGhostSlots>(EMPTY_SEED_GHOST);
@@ -1001,6 +1020,8 @@ export function MainLabWorkspace() {
       setLoading(true);
       setSeriesTitle("");
       setSeriesItems([]);
+      setConceptBrief(null);
+      setBriefDraft(null);
       setResultsModalOpen(false);
       playSwitchClick();
 
@@ -1035,7 +1056,7 @@ export function MainLabWorkspace() {
           emotion,
           speedMode: requestedSpeedMode,
           intensity: requestedIntensity,
-          identityMode: identityFilterOn ? "rich" : "vanilla",
+          identityMode: "rich",
           ngWords: ghost.ngWords,
           stylePrompt: ghost.stylePrompt.trim(),
           personaKeywords,
@@ -1054,6 +1075,8 @@ export function MainLabWorkspace() {
 
         const seriesData = data as SeriesResult;
         setSeriesTitle(seriesData.seriesTitle);
+        setConceptBrief(seriesData.conceptBrief);
+        setBriefDraft(seriesData.conceptBrief);
         setSeriesItems(sortSeriesLikeItemsBySlotOrder(seriesData.items));
 
         const row = await saveGenerationRecord({
@@ -1065,6 +1088,7 @@ export function MainLabWorkspace() {
           speedMode: requestedSpeedMode,
           adviceHint: seriesData.adviceHint ?? null,
           ghostWhisper: seriesData.ghostWhisper ?? null,
+          conceptBrief: seriesData.conceptBrief,
           quickFeedback: null,
           memoryTags: seriesData.memoryTags ?? [],
           items: seriesData.items.map((item) => ({
@@ -1082,7 +1106,6 @@ export function MainLabWorkspace() {
         } else {
           setLastSavedSeries(null);
         }
-        setLastGenerationIdentityMode(identityFilterOn ? "rich" : "vanilla");
       } catch (e) {
         setError(e instanceof Error ? e.message : "エラー");
       } finally {
@@ -1106,7 +1129,6 @@ export function MainLabWorkspace() {
       refinementAnswer,
       strategyGoal,
       usagePurposeId,
-      identityFilterOn,
     ],
   );
 
@@ -1128,6 +1150,8 @@ export function MainLabWorkspace() {
     setResultsModalOpen(false);
     setSeriesItems([]);
     setSeriesTitle("");
+    setConceptBrief(null);
+    setBriefDraft(null);
     setLastSavedSeries(null);
     setError(null);
     playSwitchClick();
@@ -1140,6 +1164,11 @@ export function MainLabWorkspace() {
   const columnBodyClass =
     "min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]";
   const hasLiveOutput = seriesItems.length === 3;
+  const activeConceptBrief = lastSavedSeries?.conceptBrief ?? conceptBrief;
+  const visibleConceptBrief = briefDraft ?? activeConceptBrief;
+  const briefHasEdits =
+    Boolean(activeConceptBrief && briefDraft) &&
+    JSON.stringify(activeConceptBrief) !== JSON.stringify(briefDraft);
   const alignmentPercent =
     dnaAlignment == null
       ? null
@@ -1179,6 +1208,8 @@ export function MainLabWorkspace() {
 
   const handleDeployToRoadmap = useCallback(() => {
     if (!lastSavedSeries) return;
+    const brief = lastSavedSeries.conceptBrief ?? conceptBrief;
+    const firstGeneratedAction = seriesItems[0]?.immediateAction?.trim();
     const payload: RoadmapDeployContextV1 = {
       v: 1,
       seriesId: lastSavedSeries.id,
@@ -1186,8 +1217,8 @@ export function MainLabWorkspace() {
       usagePurposeLabel: activePurpose.label,
       usagePurposePhase: activePurpose.phase,
       weaponLabel: activeTemplate?.label ?? "",
-      firstAction: activeProtocol.firstAction,
-      finalGoal: activeProtocol.finalGoal,
+      firstAction: firstGeneratedAction || activeProtocol.firstAction,
+      finalGoal: brief?.oneLiner ?? activeProtocol.finalGoal,
       protocolLines: activeProtocol.modalLines.map((entry) => ({
         hat: entry.hat,
         short: HAT_META[entry.hat].short,
@@ -1205,11 +1236,64 @@ export function MainLabWorkspace() {
     activePurpose.phase,
     activeProtocol,
     activeTemplate?.label,
+    conceptBrief,
     dnaAlignmentReason,
     identityResonancePercent,
     lastSavedSeries,
     router,
+    seriesItems,
   ]);
+
+  useEffect(() => {
+    setBriefDraft(activeConceptBrief ?? null);
+  }, [activeConceptBrief]);
+
+  const updateBriefDraftField = useCallback(
+    (key: keyof ConceptBrief, value: string) => {
+      setBriefDraft((prev) => {
+        const base = prev ?? activeConceptBrief;
+        if (!base) return prev;
+        return { ...base, [key]: value };
+      });
+    },
+    [activeConceptBrief],
+  );
+
+  const handleSaveBriefDraft = useCallback(async () => {
+    if (!lastSavedSeries || !briefDraft) return;
+    setBriefSaving(true);
+    try {
+      const row = await patchSeriesConceptBrief(lastSavedSeries.id, briefDraft);
+      setLastSavedSeries(row);
+      setConceptBrief(row.conceptBrief ?? briefDraft);
+      setBriefDraft(row.conceptBrief ?? briefDraft);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Concept Brief の保存に失敗しました");
+    } finally {
+      setBriefSaving(false);
+    }
+  }, [briefDraft, lastSavedSeries]);
+
+  const handleAudioInputChange = useCallback(async (file: File | null) => {
+    if (!file) return;
+    setAudioTranscribing(true);
+    setError(null);
+    try {
+      const { text } = await transcribeAudioFile(file);
+      const trimmed = text.trim();
+      if (trimmed) {
+        setDraft((prev) => {
+          const current = prev.trim();
+          return current ? `${current}\n\n${trimmed}` : trimmed;
+        });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "音声入力に失敗しました");
+    } finally {
+      setAudioTranscribing(false);
+      if (audioInputRef.current) audioInputRef.current.value = "";
+    }
+  }, []);
 
   useEffect(() => {
     if (hasLiveOutput && !prevHasLiveOutputRef.current) {
@@ -1431,7 +1515,7 @@ export function MainLabWorkspace() {
                 )}
               >
                 <div className="flex min-h-0 w-full flex-1 flex-col gap-3">
-                  <div className="relative z-20 isolate flex shrink-0 flex-col gap-2">
+                  <div className="relative z-20 isolate order-2 flex shrink-0 flex-col gap-2">
                     <div className="shrink-0 space-y-1">
                       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1439,7 +1523,7 @@ export function MainLabWorkspace() {
                             自由メモ（Scrap）
                           </p>
                           <span className="shrink-0 rounded-full border border-border/40 bg-muted/40 px-2 py-0.5 text-[9px] font-medium text-muted-foreground">
-                            常に最上段
+                            自由入力
                           </span>
                         </div>
                         {trimmedDraft.length > 0 ? (
@@ -1450,10 +1534,34 @@ export function MainLabWorkspace() {
                       </div>
                       <p className="text-[10px] leading-snug text-muted-foreground sm:text-[11px] sm:leading-relaxed">
                         {SCRAP_GHOST_MIN_CHARS} 文字以上で Scrap から AI
-                        が下の各欄へ提案を出します。紫枠をタップすると確定（Scrap
+                        が解像度シートの各欄へ提案を出します。紫枠をタップすると確定（Scrap
                         は消えません）。
                       </p>
                     </div>
+                    <input
+                      ref={audioInputRef}
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        void handleAudioInputChange(event.currentTarget.files?.[0] ?? null);
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-auto w-full justify-center gap-2 py-2 text-xs"
+                      disabled={audioTranscribing}
+                      onClick={() => audioInputRef.current?.click()}
+                    >
+                      {audioTranscribing ? (
+                        <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                      ) : (
+                        <Mic className="size-3.5" aria-hidden />
+                      )}
+                      {audioTranscribing ? "音声を文字起こし中..." : "音声ファイルからScrapへ追加"}
+                    </Button>
                     {roadmapBufferCount > 0 ? (
                       <Button
                         type="button"
@@ -1482,7 +1590,7 @@ export function MainLabWorkspace() {
                     />
                   </div>
 
-                  <div className="relative z-10 mt-2 shrink-0 space-y-3 border-t border-border/25 pt-4">
+                  <div className="relative z-10 order-1 shrink-0 space-y-3 border-b border-border/25 pb-4">
                     <div className="flex flex-wrap items-start justify-between gap-2 rounded-2xl border border-border/40 bg-muted/15 px-3 py-2.5">
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-1">
@@ -1766,17 +1874,16 @@ export function MainLabWorkspace() {
                 "flex min-h-0 flex-col max-lg:overflow-visible",
               )}
             >
-              <div
-                className={cn(
-                  columnHeaderBase,
-                  purposeSurface.headerWash,
-                  "py-2",
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-x-1.5 gap-y-1">
-                  <p className="text-[13px] font-semibold tracking-tight text-foreground sm:text-sm">
-                    PROTOCOL & DEPLOY
-                  </p>
+              <div className={cn(columnHeaderBase, purposeSurface.headerWash)}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold tracking-tight text-foreground">
+                      PROTOCOL & DEPLOY
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      作戦の確認と生成
+                    </p>
+                  </div>
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                     {loading ? (
                       <Badge className="animate-pulse rounded-full bg-violet-600 px-2 py-0.5 text-[10px] text-white">
@@ -1807,57 +1914,8 @@ export function MainLabWorkspace() {
                         武器未選択
                       </Badge>
                     )}
-                    <div
-                      className="inline-flex items-center gap-0.5 rounded-full border border-border/35 bg-background/70 px-0.5 py-0.5 shadow-sm"
-                      title="OFF ではペルソナ・DNA・成功メモを外し、比較用の浅い一般論寄りの出力になります。"
-                    >
-                      <Filter
-                        className="ml-0.5 size-3 shrink-0 text-muted-foreground"
-                        aria-hidden
-                      />
-                      <button
-                        type="button"
-                        className={cn(
-                          "rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors",
-                          identityFilterOn
-                            ? "bg-violet-600 text-white shadow-sm"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        aria-pressed={identityFilterOn}
-                        onClick={() => {
-                          playSwitchClick();
-                          setIdentityFilterOn(true);
-                        }}
-                      >
-                        ON
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          "mr-0.5 rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors",
-                          !identityFilterOn
-                            ? "bg-zinc-600 text-white shadow-sm dark:bg-zinc-500"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        aria-pressed={!identityFilterOn}
-                        onClick={() => {
-                          playSwitchClick();
-                          setIdentityFilterOn(false);
-                        }}
-                      >
-                        OFF
-                      </button>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground">
-                      (Filter {identityFilterOn ? "ON" : "OFF"})
-                    </span>
                   </div>
                 </div>
-                {!identityFilterOn ? (
-                  <p className="mt-1 text-[10px] leading-snug text-amber-800/90 dark:text-amber-200/85">
-                    OFF 時は Vanilla 比較用の浅い一般論寄り出力になります。
-                  </p>
-                ) : null}
               </div>
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1923,7 +1981,7 @@ export function MainLabWorkspace() {
 
                   <details className="group rounded-xl border border-border/20 bg-muted/6 open:border-border/35 open:bg-muted/10">
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-2 text-[11px] font-medium text-foreground marker:content-none [&::-webkit-details-marker]:hidden sm:px-3 sm:text-xs">
-                      <span>補助プレビュー（Vault 観測・Vanilla）</span>
+                      <span>補助プレビュー（実行メモ）</span>
                       <span className="text-[10px] font-normal text-muted-foreground group-open:hidden">
                         開く
                       </span>
@@ -1934,11 +1992,11 @@ export function MainLabWorkspace() {
                     <div className="space-y-3 border-t border-border/15 px-3 pb-3 pt-2">
                       <div>
                         <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
-                          期待する反応
+                          次に確かめること
                         </p>
                         <p className="mt-0.5 text-[10px] text-muted-foreground">
-                          「{activePurpose.label}」に合わせた Vault
-                          還流の観測スロット
+                          「{activePurpose.label}」に合わせて Roadmap
+                          に残す実行メモの観点
                         </p>
                         <div className="mt-2 grid gap-2">
                           {vaultReactionSlots.map((slot) => (
@@ -1957,59 +2015,6 @@ export function MainLabWorkspace() {
                           ))}
                         </div>
                       </div>
-                      {!identityFilterOn ? (
-                        <div className="rounded-xl border border-dashed border-border/40 bg-muted/10 p-3">
-                          <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
-                            Vanilla 比較（イメージ）
-                          </p>
-                          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-                            Identity OFF
-                            時に寄りやすい抽象案の雰囲気（種とは未連動の定型）。
-                          </p>
-                          <ul className="mt-2 space-y-1.5">
-                            {VANILLA_COMPARISON_ACTION_PLAN.map((line, i) => (
-                              <li
-                                key={i}
-                                className="text-[11px] leading-relaxed text-muted-foreground/75 text-pretty dark:text-muted-foreground/70"
-                              >
-                                {line}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-                      {!loading &&
-                      hasLiveOutput &&
-                      identityFilterOn &&
-                      !resultsModalOpen ? (
-                        <div className="rounded-xl border border-dashed border-amber-200/55 bg-amber-50/25 p-3 dark:border-amber-800/40 dark:bg-amber-950/15">
-                          <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100">
-                            Vanilla 比較メモ
-                          </p>
-                          {lastGenerationIdentityMode === "vanilla" ? (
-                            <p className="mt-1 text-xs leading-relaxed text-amber-950/85 dark:text-amber-100/85">
-                              直近の生成は Identity Filter OFF
-                              です。モーダル内が「浅い一般論寄り」の比較出力になっています。
-                            </p>
-                          ) : (
-                            <p className="mt-1 text-xs leading-relaxed text-amber-950/85 dark:text-amber-100/85">
-                              直近のレポートは Identity ON です。OFF
-                              と比較するには OFF
-                              に切り替えてから「生成する」を押してください。
-                            </p>
-                          )}
-                          <ul className="mt-2 space-y-1 opacity-60">
-                            {VANILLA_COMPARISON_ACTION_PLAN.map((line, i) => (
-                              <li
-                                key={i}
-                                className="text-[10px] leading-relaxed text-muted-foreground line-clamp-2"
-                              >
-                                {line}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
                     </div>
                   </details>
 
@@ -2156,7 +2161,7 @@ export function MainLabWorkspace() {
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
                       Protocol を確認済みなら、ここでは{" "}
                       <span className="font-medium text-foreground/90">
-                        Roadmap へ載せて検証を回す
+                        Roadmap へ載せて最初の行動に移す
                       </span>{" "}
                       だけに集中できます。
                     </p>
@@ -2174,19 +2179,6 @@ export function MainLabWorkspace() {
                         {activeTemplate?.label ?? "武器未選択"}
                       </Badge>
                     </div>
-                    {lastGenerationIdentityMode === "vanilla" ? (
-                      <p className="rounded-lg border border-amber-200/70 bg-amber-50/90 px-2.5 py-1.5 text-[10px] leading-relaxed text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-100">
-                        <span className="font-semibold">Vanilla 比較</span>
-                        （Filter OFF）の出力です。本番の作戦には ON
-                        で再生成を推奨。{" "}
-                        <Link
-                          href="/identity"
-                          className="font-semibold underline underline-offset-2"
-                        >
-                          Identity
-                        </Link>
-                      </p>
-                    ) : null}
                   </div>
                 </div>
                 <Button
@@ -2203,9 +2195,122 @@ export function MainLabWorkspace() {
             </div>
 
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 [scrollbar-gutter:stable]">
+              {visibleConceptBrief ? (
+                <section className="space-y-3 rounded-2xl border border-violet-200/70 bg-violet-50/75 p-4 dark:border-violet-900/45 dark:bg-violet-950/25">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-800/75 dark:text-violet-200/75">
+                      Concept Brief
+                    </p>
+                    <h3 className="mt-1 text-base font-bold leading-snug text-violet-950 dark:text-violet-50">
+                      {visibleConceptBrief.oneLiner}
+                    </h3>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={briefHasEdits ? "default" : "outline"}
+                      className="h-8 gap-1.5 text-xs"
+                      disabled={!lastSavedSeries || !briefDraft || briefSaving || !briefHasEdits}
+                      onClick={() => void handleSaveBriefDraft()}
+                    >
+                      {briefSaving ? (
+                        <Loader2 className="size-3 animate-spin" aria-hidden />
+                      ) : (
+                        <Save className="size-3" aria-hidden />
+                      )}
+                      {briefSaving ? "保存中" : briefHasEdits ? "Briefを保存" : "保存済み"}
+                    </Button>
+                  </div>
+                  <div className="grid gap-2">
+                    <label className="block space-y-1">
+                      <span className="text-[10px] font-semibold text-muted-foreground">一言コンセプト</span>
+                      <Textarea
+                        value={briefDraft?.oneLiner ?? visibleConceptBrief.oneLiner}
+                        onChange={(event) => updateBriefDraftField("oneLiner", event.target.value)}
+                        rows={2}
+                        className="min-h-12 bg-background/85 text-xs"
+                      />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-[10px] font-semibold text-muted-foreground">価値提案</span>
+                      <Textarea
+                        value={briefDraft?.valueProposition ?? visibleConceptBrief.valueProposition}
+                        onChange={(event) => updateBriefDraftField("valueProposition", event.target.value)}
+                        rows={2}
+                        className="min-h-12 bg-background/85 text-xs"
+                      />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-[10px] font-semibold text-muted-foreground">30秒ピッチ</span>
+                      <Textarea
+                        value={briefDraft?.elevatorPitch ?? visibleConceptBrief.elevatorPitch}
+                        onChange={(event) => updateBriefDraftField("elevatorPitch", event.target.value)}
+                        rows={3}
+                        className="min-h-16 bg-background/85 text-xs"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid gap-2 text-xs sm:grid-cols-2">
+                    {[
+                      ["誰に", visibleConceptBrief.audience],
+                      ["痛み", visibleConceptBrief.pain],
+                      ["なぜ今", visibleConceptBrief.whyNow],
+                      ["なぜ自分", visibleConceptBrief.whyMe],
+                      ["MVP", visibleConceptBrief.mvp],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-violet-200/55 bg-background/70 px-3 py-2 dark:border-violet-900/35 dark:bg-background/55">
+                        <p className="text-[10px] font-semibold text-muted-foreground">{label}</p>
+                        <p className="mt-1 leading-relaxed text-foreground/90">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <details className="rounded-xl border border-violet-200/55 bg-background/70 px-3 py-2 dark:border-violet-900/35 dark:bg-background/55">
+                    <summary className="cursor-pointer text-[10px] font-semibold text-muted-foreground">
+                      Before / After・編集比較
+                    </summary>
+                    <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+                      <div className="rounded-lg border border-dashed border-border/50 bg-muted/25 p-2">
+                        <p className="text-[10px] font-semibold text-muted-foreground">Before: Scrap</p>
+                        <p className="mt-1 line-clamp-5 whitespace-pre-wrap leading-relaxed text-muted-foreground">{storedSeed}</p>
+                      </div>
+                      <div className="rounded-lg border border-violet-200/55 bg-violet-50/60 p-2 dark:border-violet-900/35 dark:bg-violet-950/25">
+                        <p className="text-[10px] font-semibold text-muted-foreground">
+                          After: {briefHasEdits ? "編集中のBrief" : "生成されたBrief"}
+                        </p>
+                        <p className="mt-1 leading-relaxed text-foreground/90">{visibleConceptBrief.oneLiner}</p>
+                      </div>
+                    </div>
+                    {activeConceptBrief && briefHasEdits ? (
+                      <div className="mt-2 rounded-lg border border-amber-200/70 bg-amber-50/70 p-2 text-xs dark:border-amber-900/45 dark:bg-amber-950/25">
+                        <p className="text-[10px] font-semibold text-muted-foreground">AI生成版</p>
+                        <p className="mt-1 leading-relaxed text-muted-foreground">{activeConceptBrief.oneLiner}</p>
+                      </div>
+                    ) : null}
+                  </details>
+                  <details className="rounded-xl border border-violet-200/55 bg-background/70 px-3 py-2 dark:border-violet-900/35 dark:bg-background/55">
+                    <summary className="cursor-pointer text-[10px] font-semibold text-muted-foreground">
+                      用途別に言い換える
+                    </summary>
+                    <div className="mt-2 grid gap-2">
+                      {(Object.keys(CONCEPT_BRIEF_TRANSFORM_LABELS) as ConceptBriefTransformKey[]).map((key) => (
+                        <div key={key} className="rounded-lg border border-border/45 bg-muted/20 p-2">
+                          <p className="text-[10px] font-semibold text-foreground">
+                            {CONCEPT_BRIEF_TRANSFORM_LABELS[key]}
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                            {buildConceptBriefTransform(visibleConceptBrief, key)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </section>
+              ) : null}
+
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  作戦名
+                  実行プラン名
                 </p>
                 <p className="mt-0.5 text-base font-semibold leading-snug text-foreground sm:text-lg">
                   {seriesTitle}

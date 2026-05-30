@@ -24,6 +24,17 @@ const createSingleGenerationSchema = z.object({
   memoryTags: z.array(z.string()).optional(),
 });
 
+const conceptBriefSchema = z.object({
+  oneLiner: z.string().min(1),
+  audience: z.string().min(1),
+  pain: z.string().min(1),
+  valueProposition: z.string().min(1),
+  whyNow: z.string().min(1),
+  whyMe: z.string().min(1),
+  mvp: z.string().min(1),
+  elevatorPitch: z.string().min(1),
+});
+
 const createSeriesGenerationSchema = z.object({
   generationMode: z.literal("series"),
   title: z.string().min(1),
@@ -33,6 +44,7 @@ const createSeriesGenerationSchema = z.object({
   speedMode: z.enum(["flash", "pro"]).optional(),
   adviceHint: z.string().nullable().optional(),
   ghostWhisper: z.string().nullable().optional(),
+  conceptBrief: conceptBriefSchema.nullable().optional(),
   memoryTags: z.array(z.string()).optional(),
   items: z
     .array(

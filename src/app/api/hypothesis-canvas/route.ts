@@ -27,10 +27,10 @@ const bodySchema = z.object({
 });
 
 const USAGE_PURPOSE_HINTS = {
-  discovery: "ユーザーは発想の種を増やしたい。DNA一致率は厳しすぎず、探索余地を残す評価に寄せる。",
-  blueprint: "ユーザーはコンセプトの芯を固めたい。DNAとの整合とストーリーの一貫性を重視する。",
-  refinement: "ユーザーは仮説を圧縮したい。DNAとのズレや前提の穴を厳しめに検出する。",
-  communication: "ユーザーは一言の打ち力を求めている。短いコピー前提でDNAのトーンとの一致を見る。",
+  discovery: "ユーザーは発想の種を増やしたい。Identity一致率は厳しすぎず、探索余地を残す評価に寄せる。",
+  blueprint: "ユーザーはコンセプトの芯を固めたい。Identityとの整合とストーリーの一貫性を重視する。",
+  refinement: "ユーザーは仮説を圧縮したい。Identityとのズレや前提の穴を厳しめに検出する。",
+  communication: "ユーザーは一言の打ち力を求めている。短いコピー前提でIdentityのトーンとの一致を見る。",
 } as const;
 
 const USAGE_PURPOSE_LABELS = {
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     const personaBlock =
       personaKeywords.length > 0 || personaSummary.trim() !== ""
         ? [
-            personaKeywords.length > 0 ? `ペルソナDNA: ${personaKeywords.join("、")}` : null,
+            personaKeywords.length > 0 ? `投稿ペルソナ（キーワード）: ${personaKeywords.join("、")}` : null,
             personaSummary.trim() !== "" ? `ペルソナ要約: ${personaSummary.trim()}` : null,
           ]
             .filter(Boolean)
@@ -99,14 +99,14 @@ export async function POST(request: Request) {
         maxRetries: 0,
         system: [
           "あなたは起業家の仮説を磨く厳しく優秀な壁打ち相手です。",
-          "入力中の事業アイデアを見て、今ぶつけるべき仮説の一行要約、プレビュータイトル、DNA一致率、理由、そして生成前に考えるべき鋭い質問を1つ返してください。",
+          "入力中の事業アイデアを見て、今ぶつけるべき仮説の一行要約、プレビュータイトル、Identity一致率（dnaAlignment）、理由、そして生成前に考えるべき鋭い質問を1つ返してください。",
           "summary は『今回ぶつける仮説はこれですね』に続く1行として自然な日本語にする。",
           "previewTitle は発信案のタイトルプレビュー。SNS見出しのように短く、でも煽りすぎない。",
           "question は曖昧さを削るための逆質問を1つだけ。抽象的ではなく、答えると仮説が前進する問いにする。",
           "タブー候補に触れる語を提案する場合は [SHREDDED:<語句>] を併記し、直後により安全な代替表現を提案する。",
-          "dnaAlignment は、ペルソナDNAとの一致率を0〜100で返す。DNA情報が少ない場合は50前後に寄せる。",
+          "dnaAlignment は、投稿に使うIdentity（ペルソナ）との一致率を0〜100で返す。Identity情報が少ない場合は50前後に寄せる。",
           "dnaReason は一致率の理由を短く説明する。",
-          "warning は、DNAと大きくズレている場合だけ入れる。ズレが小さいときは null。",
+          "warning は、Identityと大きくズレている場合だけ入れる。ズレが小さいときは null。",
           identityBlock,
           shredderBlock,
           `ROOTS還流優先度: ${billing.rootsSyncPriority}`,

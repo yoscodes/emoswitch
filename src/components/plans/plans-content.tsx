@@ -71,9 +71,9 @@ const FREE_PLAN: PlanRow = {
   dnaSlot: "1 Identity（検証の入り口）",
   aiWallDepth: "基本AIアドバイス（標準）",
   strategyRange: "基本4フェーズ（探索・構築・研磨・伝達）",
-  dnaEvolution: "なし",
+  dnaEvolution: "標準の実行メモ還流",
   tabooStrictness: "標準ガード",
-  target: "まずは小さく検証を始めたい人",
+  target: "まずは小さく事業案を言葉にしたい人",
 };
 
 const UNLIMITED_PLAN: PlanRow = {
@@ -81,12 +81,12 @@ const UNLIMITED_PLAN: PlanRow = {
   subtitle: "Unlimited",
   monthly: PLAN_MONTHLY_JPY.unlimited,
   generationQuota: "無制限（実用上限: 1日100回）",
-  dnaSlot: "Identity（DNA）スロット無制限",
-  aiWallDepth: "上位モデルで精密シミュレーション",
-  strategyRange: "全8フェーズ（検証・拡張・防衛・整列）を完全開放",
-  dnaEvolution: "ROOTS・バッファ同期を優先実行",
-  tabooStrictness: "高精度ガード + 防衛観点",
-  target: "Identity Labを事業の軍師として使い切る人",
+  dnaSlot: "Identity スロット無制限",
+  aiWallDepth: "上位モデルでConcept Briefを深く整理",
+  strategyRange: "基本4フェーズ（探索・構築・研磨・伝達）を回数制限なく利用",
+  dnaEvolution: "実行メモ・Identity同期を優先",
+  tabooStrictness: "高精度ガード + Identity観点",
+  target: "Concept Forge を本気で使い込む人",
 };
 
 function FeatureRow({ children }: { children: ReactNode }) {
@@ -214,15 +214,15 @@ export function PlansContent() {
         <section className="mx-auto max-w-3xl space-y-4 pb-6 text-center md:pb-12">
           <Badge variant="secondary" className="text-xs">
             <Sparkles className="mr-1 size-3" />
-            Persona DNA Plans
+            Concept Forge Plans
           </Badge>
           <h1 className="text-balance text-3xl font-bold tracking-tight md:text-5xl">
-            あなたの Identity（自己）を、
+            言葉にできない事業案を、
             <br />
-            持続可能な事業へと加速させる。
+            伝わるコンセプトへ。
           </h1>
           <p className="text-lg text-muted-foreground md:text-xl">
-            Identity Lab は、あなたの情熱を事業に変えるためのツールです。全機能を使って、本気で成功を目指しましょう。
+            Concept Forge は、まだ輪郭のない構想を、説明できる言葉と実行できる設計へ鍛えるためのツールです。
           </p>
         </section>
 
@@ -381,7 +381,7 @@ function PlanCard({
               <strong className="text-foreground">AI実行回数:</strong> {plan.generationQuota}
             </FeatureRow>
             <FeatureRow>
-              <strong className="text-foreground">DNAスロット:</strong> {plan.dnaSlot}
+              <strong className="text-foreground">Identityスロット:</strong> {plan.dnaSlot}
             </FeatureRow>
             <FeatureRow>
               <strong className="text-foreground">思考の解像度:</strong> {plan.aiWallDepth}
@@ -390,7 +390,7 @@ function PlanCard({
               <strong className="text-foreground">戦略の射程:</strong> {plan.strategyRange}
             </FeatureRow>
             <FeatureRow>
-              <strong className="text-foreground">DNA自動進化:</strong> {plan.dnaEvolution}
+              <strong className="text-foreground">実行メモの還流:</strong> {plan.dnaEvolution}
             </FeatureRow>
             <FeatureRow>
               <strong className="text-foreground">My Taboo:</strong> {plan.tabooStrictness}

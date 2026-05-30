@@ -76,9 +76,9 @@ export function IdentityGhostWorkspace() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 pb-24 md:px-6">
       <header className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Identity Ghost</h1>
+        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Ghost 設定</h1>
         <p className="text-sm text-muted-foreground">
-          Identity配下で、プロフィール参照・起業家スタンスメモ・NGワードを管理します。
+          設定の補助画面として、プロフィール参照・起業家スタンスメモ・NGワードをまとめて編集します。
         </p>
       </header>
 
@@ -125,7 +125,7 @@ export function IdentityGhostWorkspace() {
               {saving ? "保存中..." : "保存する"}
             </Button>
             <Link href="/identity" className={cn(buttonVariants({ variant: "ghost" }))}>
-              戻る
+              Identity に戻る
             </Link>
           </div>
           {status ? <p className="text-sm text-emerald-600">{status}</p> : null}

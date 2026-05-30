@@ -10,10 +10,17 @@ import { CreditStatus } from "@/components/credit-status";
 import { cn } from "@/lib/utils";
 
 const links = [
-  { href: "/lab", label: "種", icon: Home },
-  { href: "/roadmap", label: "作戦", icon: Map },
+  { href: "/lab", label: "生成", icon: Home },
+  { href: "/roadmap", label: "実行", icon: Map },
   { href: "/identity", label: "Identity", icon: Fingerprint },
 ] as const;
+
+function isNavActive(pathname: string, href: (typeof links)[number]["href"]): boolean {
+  if (href === "/identity") {
+    return pathname === "/identity" || pathname.startsWith("/identity/");
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export function AppNav() {
   const pathname = usePathname();
@@ -48,7 +55,7 @@ export function AppNav() {
             <Zap className="size-4 text-(--mode-color,white) fill-(--mode-color,transparent)" />
           </div>
           <span className="bg-linear-to-r from-foreground to-foreground/60 bg-clip-text text-transparent">
-            Identity DNA
+            Concept Forge
           </span>
         </Link>
         <div className="flex items-center gap-2 md:hidden">
@@ -59,7 +66,7 @@ export function AppNav() {
         {/* ナビゲーション */}
         <ul className="flex flex-1 justify-around md:col-start-2 md:row-start-1 md:flex-none md:justify-center md:gap-2 relative">
           {links.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+            const active = isNavActive(pathname, href);
             return (
               <li key={href} className="relative">
                 <Link
