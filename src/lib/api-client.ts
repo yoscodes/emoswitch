@@ -212,10 +212,33 @@ export type BillingStatus = {
   isActive: boolean;
 };
 
+export type BillingHistory = {
+  nextGrant: {
+    enabled: boolean;
+    planTier: string;
+    billingCycle: "monthly" | "yearly" | null;
+    nextGrantAt: string | null;
+  };
+  rows: Array<{
+    id: string;
+    delta: number;
+    reason: string;
+    label: string;
+    note: string | null;
+    createdAt: string;
+    stripeInvoiceId: string | null;
+  }>;
+};
+
 export async function fetchBillingStatus(): Promise<BillingStatus> {
   await ensureDemoWorkspace();
   const data = await requestJson<{ status: BillingStatus }>("/api/billing/status");
   return data.status;
+}
+
+export async function fetchBillingHistory(): Promise<BillingHistory> {
+  await ensureDemoWorkspace();
+  return requestJson<BillingHistory>("/api/billing/history");
 }
 
 export function notifyDataSync(): void {

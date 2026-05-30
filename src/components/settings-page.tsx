@@ -1,20 +1,21 @@
 "use client";
 
 import Image from "next/image";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Copy, CreditCard, MoonStar, UserCircle2 } from "lucide-react";
+import { CalendarClock, Copy, CreditCard, FileText, ReceiptText, ShieldCheck, UserCircle2 } from "lucide-react";
 
 import {
+  type BillingHistory,
+  fetchBillingHistory,
   fetchCreditSummary,
-  fetchGhostSettings,
   fetchUserProfile,
-  updateGhostSettings,
   saveUserProfile,
 } from "@/lib/api-client";
 import { useAuthSession } from "@/lib/use-auth-session";
-import type { CreditSummary, GhostSettings, UserProfileSettings } from "@/lib/types";
+import type { CreditSummary, UserProfileSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,6 +74,21 @@ function buildPreview(profile: UserProfileSettings | null): string {
   return `${toneMap[profile.writingStyle]}。初期の市場への見せ方は「${EMOTION_OPTIONS.find((item) => item.value === profile.defaultEmotion)?.label ?? "共感導入"}」で始まり、語尾は「${endingMap[profile.sentenceStyle]}」の雰囲気になります。`;
 }
 
+function formatDate(value: string | null): string {
+  if (!value) return "未定";
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(value));
+}
+
+function formatBillingCycle(value: BillingHistory["nextGrant"]["billingCycle"]): string {
+  if (value === "monthly") return "月次";
+  if (value === "yearly") return "年次";
+  return "未設定";
+}
+
 export function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -87,12 +103,11 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfileSettings | null>(null);
   const [credit, setCredit] = useState<CreditSummary | null>(null);
-  const [ghostSettings, setGhostSettings] = useState<GhostSettings | null>(null);
+  const [billingHistory, setBillingHistory] = useState<BillingHistory | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [defaultEmotion, setDefaultEmotion] = useState<UserProfileSettings["defaultEmotion"]>("empathy");
   const [writingStyle, setWritingStyle] = useState<UserProfileSettings["writingStyle"]>("casual");
   const [sentenceStyle, setSentenceStyle] = useState<UserProfileSettings["sentenceStyle"]>("friendly");
-  const [profileUrlDraft, setProfileUrlDraft] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -106,19 +121,18 @@ export function SettingsPage() {
 
     void (async () => {
       try {
-        const [profileData, creditData, ghostData] = await Promise.all([
+        const [profileData, creditData, billingData] = await Promise.all([
           fetchUserProfile(),
           fetchCreditSummary(),
-          fetchGhostSettings(),
+          fetchBillingHistory(),
         ]);
         setProfile(profileData);
         setCredit(creditData);
-        setGhostSettings(ghostData);
+        setBillingHistory(billingData);
         setDisplayName(profileData.displayName);
         setDefaultEmotion(profileData.defaultEmotion);
         setWritingStyle(profileData.writingStyle);
         setSentenceStyle(profileData.sentenceStyle);
-        setProfileUrlDraft(ghostData.profileUrl);
       } catch (e) {
         setError(e instanceof Error ? e.message : "設定情報の取得に失敗しました");
       } finally {
@@ -171,32 +185,6 @@ export function SettingsPage() {
       setError("保存に失敗しました。");
     }
   };
-
-  const handleSaveProfileImport = async () => {
-    if (!ghostSettings) return;
-    setError(null);
-    setStatus(null);
-    try {
-      const nextGhost = await updateGhostSettings({
-        profileUrl: profileUrlDraft.trim(),
-        ngWords: ghostSettings.ngWords,
-        stylePrompt: ghostSettings.stylePrompt,
-      });
-      setGhostSettings(nextGhost);
-      setProfileUrlDraft(nextGhost.profileUrl);
-      setStatus("保存しました。");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました。");
-    }
-  };
-
-  const hasSavedProfileUrl = (ghostSettings?.profileUrl ?? "").trim() !== "";
-  const urlFeedback =
-    profileUrlDraft.trim() === ""
-      ? null
-      : /^https?:\/\/(www\.)?(x|twitter)\.com\/.+/i.test(profileUrlDraft.trim())
-        ? "保存すると反映されます。"
-        : "保存すると反映されます。";
 
   if (authLoading || loading) {
     return (
@@ -386,54 +374,6 @@ export function SettingsPage() {
 
                   <Button onClick={() => void handleSaveProfile()}>保存する</Button>
                 </div>
-
-                <div className="space-y-4 rounded-2xl border bg-muted/20 p-4">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">ペルソナ連携</p>
-                    <p className="text-sm text-muted-foreground">
-                      投稿 URL の入口はここでも保存できます。My Taboo や軌跡の再分析は「Identity」タブ、スタンスメモや NG の細かい編集は「Ghost」ページへどうぞ。
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <label className="text-sm font-medium" htmlFor="profile-import-url">
-                      プロフィール / 投稿 URL
-                    </label>
-                    {hasSavedProfileUrl ? <Badge variant="secondary">保存済み</Badge> : null}
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                    <div className="space-y-2">
-                      <Input
-                        id="profile-import-url"
-                        type="url"
-                        value={profileUrlDraft}
-                        onChange={(e) => setProfileUrlDraft(e.target.value)}
-                        placeholder="https://x.com/your_handle"
-                      />
-                      {urlFeedback ? (
-                        <div className="rounded-xl border bg-background/70 px-3 py-2 text-sm text-muted-foreground">
-                          {urlFeedback}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Button variant="outline" onClick={() => void handleSaveProfileImport()}>
-                      保存する
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Link href="/identity" className="inline-flex">
-                      <Button type="button" variant="secondary">
-                        Identity ページへ
-                      </Button>
-                    </Link>
-                    <Link href="/settings/ghost" className="inline-flex">
-                      <Button type="button" variant="outline">
-                        Ghost（詳細）
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -453,17 +393,53 @@ export function SettingsPage() {
                 <div className="grid gap-4 md:grid-cols-3">
                   <MetricCard label="残りクレジット" value={credit ? `${credit.remaining}回` : "..."} />
                   <MetricCard label="累計付与" value={credit ? `${credit.granted}回` : "..."} />
-                  <MetricCard label="累計検証" value={credit ? `${credit.used}回` : "..."} />
+                  <MetricCard label="累計生成" value={credit ? `${credit.used}回` : "..."} />
                 </div>
 
-                <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  次回の自動付与や決済履歴は今後ここに追加予定です。まずはプランページから生成量を管理できます。
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border bg-muted/30 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <CalendarClock className="size-4" />
+                      自動付与
+                    </div>
+                    <p className="mt-3 text-2xl font-semibold">
+                      {billingHistory?.nextGrant.enabled ? formatDate(billingHistory.nextGrant.nextGrantAt) : "無料プラン"}
+                    </p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {billingHistory?.nextGrant.enabled
+                        ? `${formatBillingCycle(billingHistory.nextGrant.billingCycle)}契約の更新時に、プラン分のクレジットが自動付与されます。`
+                        : "有料プランに切り替えると、契約更新日にクレジットが自動付与されます。"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border bg-muted/30 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <ReceiptText className="size-4" />
+                      決済・付与履歴
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      {billingHistory?.rows.length ? (
+                        billingHistory.rows.slice(0, 4).map((row) => (
+                          <div key={row.id} className="flex items-start justify-between gap-3 border-b pb-3 last:border-0 last:pb-0">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">{row.label}</p>
+                              <p className="text-xs text-muted-foreground">{formatDate(row.createdAt)}</p>
+                              {row.note ? <p className="mt-1 text-xs text-muted-foreground">{row.note}</p> : null}
+                            </div>
+                            <span className="shrink-0 text-sm font-semibold text-emerald-600">+{row.delta}回</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">まだ決済・自動付与履歴はありません。</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <Link href="/plans" className="inline-flex">
                   <Button>
                     <CreditCard className="mr-1 size-4" />
-                    保存する
+                    プランを見る
                   </Button>
                 </Link>
               </CardContent>
@@ -474,26 +450,22 @@ export function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>アプリ情報</CardTitle>
-                <CardDescription>見た目やポリシーの確認用セクションです。</CardDescription>
+                <CardDescription>Concept Forge の利用条件とデータの扱いを確認できます。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="rounded-2xl border bg-muted/30 p-4">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <MoonStar className="size-4" />
-                    外観
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    ダークモード切替は今後追加予定です。現在はシステムテーマに追従する前提でデザインを整えています。
-                  </p>
-                </div>
-
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-                    利用規約リンクは準備中です。
-                  </div>
-                  <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-                    プライバシーポリシーリンクは準備中です。
-                  </div>
+                  <LegalLinkCard
+                    href="/terms"
+                    icon={<FileText className="size-4" />}
+                    title="利用規約"
+                    description="サービス利用時の権利、禁止事項、課金、免責事項を確認できます。"
+                  />
+                  <LegalLinkCard
+                    href="/privacy"
+                    icon={<ShieldCheck className="size-4" />}
+                    title="プライバシーポリシー"
+                    description="アカウント情報、入力内容、生成データの取り扱いを確認できます。"
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -510,5 +482,27 @@ function MetricCard({ label, value }: { label: string; value: string }) {
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-2 text-xl font-semibold">{value}</p>
     </div>
+  );
+}
+
+function LegalLinkCard({
+  href,
+  icon,
+  title,
+  description,
+}: {
+  href: string;
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link href={href} className="block rounded-2xl border bg-muted/30 p-4 transition hover:bg-muted/50">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        {icon}
+        {title}
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+    </Link>
   );
 }
