@@ -577,12 +577,12 @@ function buildConceptBriefTransform(brief: ConceptBrief, key: ConceptBriefTransf
     return `${brief.audience} の「${brief.pain}」を、${brief.valueProposition} で解決します。まずは ${brief.mvp} から体験できます。`;
   }
   if (key === "investor") {
-    return `${brief.oneLiner}。対象は ${brief.audience}。未充足は ${brief.pain} で、初期MVPは ${brief.mvp}。今取り組む理由は ${brief.whyNow} です。`;
+    return `${brief.oneLiner}。対象は ${brief.audience}。未充足は ${brief.pain} で、初期MVPは ${brief.mvp}。代替手段との差分は ${brief.differentiator}。今取り組む理由は ${brief.whyNow} です。`;
   }
   if (key === "cofounder") {
     return `${brief.whyMe} という必然性を起点に、${brief.audience} の課題を一緒に形にしたいです。まず ${brief.mvp} で価値の核を確かめます。`;
   }
-  return `${brief.oneLiner}\n${brief.valueProposition}`;
+  return `${brief.oneLiner}\n${brief.valueProposition}\n${brief.differentiator}`;
 }
 
 type SeedGhostSlots = {
@@ -666,6 +666,7 @@ export function MainLabWorkspace() {
   const [dnaAlignmentReason, setDnaAlignmentReason] = useState<string | null>(
     null,
   );
+  const [aiQuestion, setAiQuestion] = useState<string | null>(null);
   const [resultsModalOpen, setResultsModalOpen] = useState(false);
   const [lastSavedSeries, setLastSavedSeries] =
     useState<GenerationSeriesRecord | null>(null);
@@ -970,6 +971,7 @@ export function MainLabWorkspace() {
     if (!storedSeed.trim()) {
       setDnaAlignment(null);
       setDnaAlignmentReason(null);
+      setAiQuestion(null);
       return;
     }
     let cancelled = false;
@@ -988,11 +990,13 @@ export function MainLabWorkspace() {
           if (cancelled) return;
           setDnaAlignment(res.dnaAlignment);
           setDnaAlignmentReason(res.dnaReason);
+          setAiQuestion(res.question.trim() || null);
         })
         .catch(() => {
           if (cancelled) return;
           setDnaAlignment(null);
           setDnaAlignmentReason(null);
+          setAiQuestion(null);
         });
     }, 420);
     return () => {
@@ -2242,6 +2246,15 @@ export function MainLabWorkspace() {
                       />
                     </label>
                     <label className="block space-y-1">
+                      <span className="text-[10px] font-semibold text-muted-foreground">代替手段との差分</span>
+                      <Textarea
+                        value={briefDraft?.differentiator ?? visibleConceptBrief.differentiator}
+                        onChange={(event) => updateBriefDraftField("differentiator", event.target.value)}
+                        rows={2}
+                        className="min-h-12 bg-background/85 text-xs"
+                      />
+                    </label>
+                    <label className="block space-y-1">
                       <span className="text-[10px] font-semibold text-muted-foreground">30秒ピッチ</span>
                       <Textarea
                         value={briefDraft?.elevatorPitch ?? visibleConceptBrief.elevatorPitch}
@@ -2255,6 +2268,7 @@ export function MainLabWorkspace() {
                     {[
                       ["誰に", visibleConceptBrief.audience],
                       ["痛み", visibleConceptBrief.pain],
+                      ["差分", visibleConceptBrief.differentiator],
                       ["なぜ今", visibleConceptBrief.whyNow],
                       ["なぜ自分", visibleConceptBrief.whyMe],
                       ["MVP", visibleConceptBrief.mvp],
@@ -2305,6 +2319,27 @@ export function MainLabWorkspace() {
                       ))}
                     </div>
                   </details>
+                </section>
+              ) : null}
+
+              {aiQuestion ? (
+                <section className="rounded-2xl border border-amber-200/70 bg-amber-50/75 p-4 shadow-sm dark:border-amber-900/45 dark:bg-amber-950/20">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-100">
+                      <CircleHelp className="size-4" aria-hidden />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800/80 dark:text-amber-100/80">
+                        AIからの逆質問
+                      </p>
+                      <p className="mt-1 text-sm font-medium leading-relaxed text-foreground">
+                        {aiQuestion}
+                      </p>
+                      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                        この問いに答えると、Concept Brief の前提がさらに削れます。必要なら上の Brief を編集してから Roadmap へ進めてください。
+                      </p>
+                    </div>
+                  </div>
                 </section>
               ) : null}
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { identityPayloadSchema } from "@/lib/identity-dna-schema";
-import { getGhostSettings, getIdentityProfile, resolveRequestActor, saveGhostSettings, saveIdentityProfile } from "@/lib/supabase/services";
+import { getGhostSettings, getIdentityProfile, requireAuthenticatedActorFromRequest, resolveRequestActor, saveGhostSettings, saveIdentityProfile } from "@/lib/supabase/services";
 
 const ghostSettingsSchema = z.object({
   profileUrl: z.string(),
@@ -57,7 +57,7 @@ export async function GET(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const json = await request.json();
     const payload = ghostSettingsWithIdentitySchema.parse(json);
     const current = await getGhostSettings(actor.userId);
@@ -126,6 +126,7 @@ export async function PUT(request: Request) {
     }
 
     const message = error instanceof Error ? error.message : "ペルソナ設定の保存に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

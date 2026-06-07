@@ -3,6 +3,7 @@ import type { EmotionTone } from "@/lib/emotions";
 import {
   embedConceptBriefInAdviceHint,
   extractConceptBriefFromAdviceHint,
+  normalizeConceptBrief,
   stripConceptBriefFromAdviceHint,
 } from "@/lib/concept-brief";
 import {
@@ -486,7 +487,7 @@ const DEMO_SERIES: Array<{
   },
 ];
 
-type AppActor = {
+export type AppActor = {
   userId: string;
   mode: "auth" | "demo";
 };
@@ -576,7 +577,7 @@ function mapSeries(row: DbSeriesRow, items: DbSeriesItemRow[]): GenerationSeries
     speedMode: row.speed_mode ?? undefined,
     adviceHint: stripConceptBriefFromAdviceHint(row.advice_hint),
     ghostWhisper: row.ghost_whisper,
-    conceptBrief: row.concept_brief ?? extractConceptBriefFromAdviceHint(row.advice_hint),
+    conceptBrief: normalizeConceptBrief(row.concept_brief) ?? extractConceptBriefFromAdviceHint(row.advice_hint),
     quickFeedback: row.quick_feedback ?? deriveSeriesFeedback(mappedItems),
     memoryTags: row.memory_tags ?? [],
     items: mappedItems,
@@ -698,7 +699,7 @@ function mapSeriesFromHypothesis(row: DbHypothesisRow, logs: DbVaultLogRow[]): G
     speedMode: strategy.speed_mode ?? undefined,
     adviceHint: stripConceptBriefFromAdviceHint(output.advice_hint),
     ghostWhisper: output.ghost_whisper ?? null,
-    conceptBrief: output.concept_brief ?? extractConceptBriefFromAdviceHint(output.advice_hint),
+    conceptBrief: normalizeConceptBrief(output.concept_brief) ?? extractConceptBriefFromAdviceHint(output.advice_hint),
     quickFeedback: deriveQuickFeedbackFromLogs(logs) ?? deriveSeriesFeedback(items),
     memoryTags: asArray(output.memory_tags),
     items,
@@ -1464,6 +1465,11 @@ export async function requireAuthenticatedUserFromRequest(request: Request): Pro
   }
 
   return getAuthenticatedUserFromToken(token);
+}
+
+export async function requireAuthenticatedActorFromRequest(request: Request): Promise<AppActor> {
+  const user = await requireAuthenticatedUserFromRequest(request);
+  return { userId: user.id, mode: "auth" };
 }
 
 async function resolveScopedUserId(userId?: string): Promise<string> {

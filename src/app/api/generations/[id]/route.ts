@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { resolveRequestActor, softDeleteGeneration, updateGeneration } from "@/lib/supabase/services";
+import { requireAuthenticatedActorFromRequest, softDeleteGeneration, updateGeneration } from "@/lib/supabase/services";
 
 const patchSchema = z.object({
   selectedIndex: z.number().int().min(0).max(2).nullable().optional(),
@@ -14,7 +14,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const { id } = await params;
     const json = await request.json();
     const payload = patchSchema.parse(json);
@@ -26,7 +26,8 @@ export async function PATCH(
     }
 
     const message = error instanceof Error ? error.message : "履歴の更新に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }
 
@@ -35,12 +36,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const actor = await resolveRequestActor(_request);
+    const actor = await requireAuthenticatedActorFromRequest(_request);
     const { id } = await params;
     await softDeleteGeneration(id, actor.userId);
     return Response.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "履歴の削除に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

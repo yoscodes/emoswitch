@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+const supportEmail = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@example.com";
+
 export const metadata: Metadata = {
   title: "プライバシーポリシー | Concept Forge",
   description: "Concept Forge における個人情報、入力内容、生成データの取り扱いについて。",
@@ -29,7 +31,7 @@ const sections = [
   },
   {
     title: "6. データの管理",
-    body: "ユーザーのデータは適切なアクセス制御のもとで管理します。アカウント削除やデータ削除に関する問い合わせには、合理的な範囲で対応します。",
+    body: `ユーザーのデータは適切なアクセス制御のもとで管理します。アカウント削除、保存データの削除、登録情報に関する問い合わせは ${supportEmail} までご連絡ください。本人確認後、法令上保持が必要な情報を除き、合理的な範囲で対応します。`,
   },
   {
     title: "7. 変更",

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   appendIdentityFieldBufferEntry,
   listIdentityFieldBufferSeriesSummary,
+  requireAuthenticatedActorFromRequest,
   resolveRequestActor,
 } from "@/lib/supabase/services";
 
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const json = await request.json();
     const payload = appendSchema.parse(json);
     await appendIdentityFieldBufferEntry(payload, actor.userId);
@@ -37,7 +38,8 @@ export async function POST(request: Request) {
       return Response.json({ error: error.issues[0]?.message ?? "入力が不正です" }, { status: 400 });
     }
     const message = error instanceof Error ? error.message : "還流キューへの追加に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }
 

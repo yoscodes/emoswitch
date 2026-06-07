@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarClock, Copy, CreditCard, FileText, ReceiptText, ShieldCheck, UserCircle2 } from "lucide-react";
+import { CalendarClock, Copy, CreditCard, FileText, Mail, ReceiptText, ShieldCheck, Trash2, UserCircle2 } from "lucide-react";
 
 import {
   type BillingHistory,
@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const SETTINGS_TABS = ["profile", "credit", "app"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
+const SUPPORT_EMAIL = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@example.com";
 
 function parseSettingsTab(value: string | null): SettingsTab {
   if (value && (SETTINGS_TABS as readonly string[]).includes(value)) {
@@ -466,6 +467,35 @@ export function SettingsPage() {
                     title="プライバシーポリシー"
                     description="アカウント情報、入力内容、生成データの取り扱いを確認できます。"
                   />
+                  <LegalLinkCard
+                    href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("Concept Forge 問い合わせ")}`}
+                    icon={<Mail className="size-4" />}
+                    title="問い合わせ先"
+                    description={`課金、解約、返金、データ削除などの問い合わせは ${SUPPORT_EMAIL} までご連絡ください。`}
+                  />
+                  <LegalLinkCard
+                    href="/plans"
+                    icon={<CreditCard className="size-4" />}
+                    title="解約・返金ポリシー"
+                    description="解約は契約管理からStripeカスタマーポータルで行えます。返金条件は利用規約をご確認ください。"
+                  />
+                </div>
+
+                <div className="rounded-2xl border bg-muted/30 p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Trash2 className="size-4" />
+                    アカウント削除
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    アカウントと保存データの削除を希望する場合は、ログイン中のメールアドレスから {SUPPORT_EMAIL} へご連絡ください。
+                    本人確認後、法令上保持が必要な情報を除き対応します。
+                  </p>
+                  <a
+                    href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("Concept Forge アカウント削除依頼")}`}
+                    className="mt-3 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    削除依頼メールを作成する
+                  </a>
                 </div>
               </CardContent>
             </Card>

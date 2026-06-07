@@ -1,9 +1,13 @@
 import OpenAI from "openai";
 
+import { requireAuthenticatedActorFromRequest } from "@/lib/supabase/services";
+
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    await requireAuthenticatedActorFromRequest(request);
+
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return Response.json({ error: "OPENAI_API_KEY が未設定です" }, { status: 500 });
@@ -28,6 +32,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "音声文字起こしに失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

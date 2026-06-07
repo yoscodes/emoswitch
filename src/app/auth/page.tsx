@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { useAuthSession } from "@/lib/use-auth-session";
 
-export default function AuthPage() {
+function AuthPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { loading, user, signInWithGoogle } = useAuthSession();
@@ -58,5 +58,24 @@ export default function AuthPage() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function AuthPageFallback() {
+  return (
+    <div className="flex min-h-dvh items-center justify-center px-6">
+      <div className="w-full max-w-md rounded-2xl border bg-background p-6 text-center shadow-sm">
+        <p className="text-sm font-medium">ログイン画面へ移動しています...</p>
+        <p className="mt-2 text-sm text-muted-foreground">Google認証後に、元の画面へ自動で戻ります。</p>
+      </div>
+    </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={<AuthPageFallback />}>
+      <AuthPageContent />
+    </Suspense>
   );
 }

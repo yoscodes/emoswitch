@@ -7,7 +7,7 @@ import {
   getAiGatewayErrorHttpStatus,
   withGeminiQuotaAwareRetry,
 } from "@/lib/ai-quota-retry";
-import { resolveRequestActor } from "@/lib/supabase/services";
+import { requireAuthenticatedActorFromRequest } from "@/lib/supabase/services";
 
 export const runtime = "edge";
 
@@ -45,7 +45,7 @@ const resultSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    await resolveRequestActor(request);
+    await requireAuthenticatedActorFromRequest(request);
     const { draft } = bodySchema.parse(await request.json());
 
     const { object } = await withGeminiQuotaAwareRetry(() =>
@@ -74,6 +74,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = formatAiGatewayErrorForClient(error);
     const status = getAiGatewayErrorHttpStatus(error);
+    if (message.includes("ログイン")) {
+      return Response.json({ error: message }, { status: 401 });
+    }
     return Response.json({ error: message }, { status: status === 429 ? 429 : 400 });
   }
 }

@@ -8,7 +8,7 @@ import {
   withGeminiQuotaAwareRetry,
 } from "@/lib/ai-quota-retry";
 import { dnaAxesSchema } from "@/lib/identity-dna-schema";
-import { getArchiveOverview, getGhostSettings, getIdentityProfile, listGenerations, listHotGenerationMemories, resolveRequestActor, saveGhostSettings, saveIdentityProfile } from "@/lib/supabase/services";
+import { getArchiveOverview, getGhostSettings, getIdentityProfile, listGenerations, listHotGenerationMemories, requireAuthenticatedActorFromRequest, saveGhostSettings, saveIdentityProfile } from "@/lib/supabase/services";
 
 const ANTI_PERSONA_PREFIX = "anti_persona";
 
@@ -79,7 +79,7 @@ function calculateDnaCompleteness(params: {
 
 export async function POST(request: Request) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const [settings, hotMemories, recentRows, overview] = await Promise.all([
       getGhostSettings(actor.userId),
       listHotGenerationMemories(actor.userId),
@@ -191,6 +191,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = formatAiGatewayErrorForClient(error);
     const status = getAiGatewayErrorHttpStatus(error);
+    if (message.includes("ログイン")) {
+      return Response.json({ error: message }, { status: 401 });
+    }
     return Response.json({ error: message }, { status: status === 429 ? 429 : 500 });
   }
 }

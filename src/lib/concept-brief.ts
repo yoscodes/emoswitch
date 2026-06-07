@@ -11,11 +11,20 @@ function isConceptBrief(value: unknown): value is ConceptBrief {
     typeof row.audience === "string" &&
     typeof row.pain === "string" &&
     typeof row.valueProposition === "string" &&
+    (typeof row.differentiator === "string" || row.differentiator === undefined) &&
     typeof row.whyNow === "string" &&
     typeof row.whyMe === "string" &&
     typeof row.mvp === "string" &&
     typeof row.elevatorPitch === "string"
   );
+}
+
+export function normalizeConceptBrief(value: unknown): ConceptBrief | null {
+  if (!isConceptBrief(value)) return null;
+  return {
+    ...value,
+    differentiator: value.differentiator ?? "",
+  };
 }
 
 export function stripConceptBriefFromAdviceHint(value: string | null | undefined): string | null {
@@ -36,7 +45,7 @@ export function extractConceptBriefFromAdviceHint(value: string | null | undefin
   try {
     const decoded = decodeURIComponent(value.slice(payloadStart, end));
     const parsed = JSON.parse(decoded) as unknown;
-    return isConceptBrief(parsed) ? parsed : null;
+    return normalizeConceptBrief(parsed);
   } catch {
     return null;
   }

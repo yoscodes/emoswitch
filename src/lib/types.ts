@@ -10,6 +10,7 @@ export type ConceptBrief = {
   audience: string;
   pain: string;
   valueProposition: string;
+  differentiator: string;
   whyNow: string;
   whyMe: string;
   mvp: string;

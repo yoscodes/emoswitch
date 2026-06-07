@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import {
-  resolveRequestActor,
+  requireAuthenticatedActorFromRequest,
   softDeleteGenerationSeries,
   updateGenerationSeriesConceptBrief,
 } from "@/lib/supabase/services";
@@ -11,6 +11,7 @@ const conceptBriefSchema = z.object({
   audience: z.string().min(1),
   pain: z.string().min(1),
   valueProposition: z.string().min(1),
+  differentiator: z.string().optional().default(""),
   whyNow: z.string().min(1),
   whyMe: z.string().min(1),
   mvp: z.string().min(1),
@@ -26,7 +27,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const { id } = await params;
     const payload = patchSchema.parse(await request.json());
     const row = await updateGenerationSeriesConceptBrief(id, payload.conceptBrief, actor.userId);
@@ -37,7 +38,8 @@ export async function PATCH(
     }
 
     const message = error instanceof Error ? error.message : "Concept Brief の更新に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }
 
@@ -46,12 +48,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const { id } = await params;
     await softDeleteGenerationSeries(id, actor.userId);
     return Response.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "連載の削除に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

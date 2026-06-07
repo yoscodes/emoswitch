@@ -386,6 +386,7 @@ export function RoadmapWorkspace() {
                   {[
                     ["誰に", activeSeries.conceptBrief.audience],
                     ["痛み", activeSeries.conceptBrief.pain],
+                    ["差分", activeSeries.conceptBrief.differentiator],
                     ["MVP", activeSeries.conceptBrief.mvp],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-xl border border-violet-200/55 bg-background/70 px-3 py-2 dark:border-violet-900/35 dark:bg-background/55">

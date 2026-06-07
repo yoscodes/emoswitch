@@ -8,7 +8,7 @@ import {
   withGeminiQuotaAwareRetry,
 } from "@/lib/ai-quota-retry";
 import { buildIdentityPromptBlock, buildShredderPromptBlock } from "@/lib/identity-prompt";
-import { getIdentityProfile, resolveBillingState, resolveRequestActor } from "@/lib/supabase/services";
+import { getIdentityProfile, requireAuthenticatedActorFromRequest, resolveBillingState } from "@/lib/supabase/services";
 
 export const runtime = "edge";
 
@@ -51,7 +51,7 @@ const canvasSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const billing = await resolveBillingState(actor.userId);
     const {
       draft,
@@ -139,6 +139,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = formatAiGatewayErrorForClient(error);
     const status = getAiGatewayErrorHttpStatus(error);
+    if (message.includes("ログイン")) {
+      return Response.json({ error: message }, { status: 401 });
+    }
     return Response.json({ error: message }, { status: status === 429 ? 429 : 400 });
   }
 }

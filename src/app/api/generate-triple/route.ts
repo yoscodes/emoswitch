@@ -7,6 +7,7 @@ import { EMOTION_LABELS, EMOTION_PROMPTS, type EmotionTone } from "@/lib/emotion
 import { buildIdentityPromptBlock, buildShredderPromptBlock } from "@/lib/identity-prompt";
 import { PLAN_IMMEDIATE_ACTION_MARK } from "@/lib/plan-immediate-mark";
 import { coercePlanItemBodyAndImmediate } from "@/lib/plan-item-coerce";
+import { maskNgWordsInText } from "@/lib/ng-word-check";
 import { STRATEGY_GOAL_SYSTEM_LABELS, STRATEGY_GOAL_SYSTEM_PROMPTS } from "@/lib/strategy-goal";
 import {
   buildComboPolarityTieBreakLine,
@@ -29,8 +30,8 @@ import {
   getDailyGenerationUsage,
   getIdentityProfile,
   listHotGenerationMemories,
+  requireAuthenticatedActorFromRequest,
   resolveBillingState,
-  resolveRequestActor,
 } from "@/lib/supabase/services";
 
 const VANILLA_IDENTITY_STUB: IdentityProfile = {
@@ -73,6 +74,7 @@ const actionPlanResultSchema = z.object({
     audience: z.string().min(8).max(180).describe("誰に向けた事業か"),
     pain: z.string().min(8).max(180).describe("扱う痛み・未充足・違和感"),
     valueProposition: z.string().min(8).max(220).describe("どんな価値を提供するか"),
+    differentiator: z.string().min(8).max(220).describe("類似サービス・代替手段と何が違うのか"),
     whyNow: z.string().min(4).max(180).describe("なぜ今この構想を形にするのか"),
     whyMe: z.string().min(4).max(180).describe("なぜこのユーザーがやる意味があるのか"),
     mvp: z.string().min(8).max(180).describe("最初に届ける最小の価値・MVP"),
@@ -107,6 +109,8 @@ const actionPlanResultSchema = z.object({
   adviceHint: z.string().optional(),
   ghostWhisper: z.string().optional(),
 });
+
+type ActionPlanResult = z.infer<typeof actionPlanResultSchema>;
 
 function normalizeForMatch(text: string): string {
   return text
@@ -179,9 +183,68 @@ function extractShredderHits(lines: string[]): string[] {
   return [...hits].slice(0, 8);
 }
 
+function normalizeTabooWords(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+}
+
+function collectHardTabooWords(identity: IdentityProfile, ngWords: readonly string[]): string[] {
+  return [
+    ...new Set([
+      ...ngWords.map((word) => word.trim()).filter(Boolean),
+      ...normalizeTabooWords(identity.myTaboo.ng_words),
+      ...normalizeTabooWords(identity.myTaboo.anti_persona),
+    ]),
+  ];
+}
+
+function maskGeneratedPlan(
+  planObject: ActionPlanResult,
+  tabooWords: readonly string[],
+): { planObject: ActionPlanResult; hits: string[] } {
+  const hits = new Set<string>();
+  const mask = (text: string) => {
+    const result = maskNgWordsInText(text, tabooWords);
+    result.hits.forEach((hit) => hits.add(hit));
+    return result.text;
+  };
+  const maskOptional = (text: string | undefined) => (text == null ? undefined : mask(text));
+
+  const maskedPlanObject: ActionPlanResult = {
+    ...planObject,
+    seriesTitle: mask(planObject.seriesTitle),
+    conceptBrief: {
+      oneLiner: mask(planObject.conceptBrief.oneLiner),
+      audience: mask(planObject.conceptBrief.audience),
+      pain: mask(planObject.conceptBrief.pain),
+      valueProposition: mask(planObject.conceptBrief.valueProposition),
+        differentiator: mask(planObject.conceptBrief.differentiator),
+      whyNow: mask(planObject.conceptBrief.whyNow),
+      whyMe: mask(planObject.conceptBrief.whyMe),
+      mvp: mask(planObject.conceptBrief.mvp),
+      elevatorPitch: mask(planObject.conceptBrief.elevatorPitch),
+    },
+    items: planObject.items.map((item) => ({
+      ...item,
+      slotLabel: mask(item.slotLabel),
+      body: mask(item.body),
+      immediateAction: mask(item.immediateAction),
+      hashtags: item.hashtags.map((tag) => mask(tag)),
+      validationMetric: maskOptional(item.validationMetric),
+    })),
+    adviceHint: maskOptional(planObject.adviceHint),
+    ghostWhisper: maskOptional(planObject.ghostWhisper),
+  };
+
+  return {
+    planObject: maskedPlanObject,
+    hits: [...hits],
+  };
+}
+
 export async function POST(request: Request) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const billing = await resolveBillingState(actor.userId);
     const dailyUsage = await getDailyGenerationUsage(actor.userId);
     if (!billing.isUnlimited && dailyUsage >= FREE_DAILY_LIMIT) {
@@ -321,6 +384,7 @@ export async function POST(request: Request) {
       "seriesTitle、conceptBrief、items を返すこと。",
       "conceptBrief は、事業の種を人に説明できる1枚の Brief として書く。コピー案ではなく、誰に何をなぜ届ける事業なのかを固定する。",
       "conceptBrief.oneLiner は、専門用語を避けた一言コンセプトにする。",
+      "conceptBrief.differentiator は、類似サービス・代替手段・既存のやり方と比べて何が違うのかを具体的に書く。単なる『AI活用』『効率化』で済ませず、顧客が選ぶ理由まで踏み込む。",
       "conceptBrief.elevatorPitch は、初対面の相手に30秒で説明する自然な日本語にする。",
       "items は次の順番で必ず3本返すこと。",
       buildUsagePurposeStepPlanPromptBlock(purposeKey),
@@ -404,7 +468,9 @@ export async function POST(request: Request) {
       }),
     );
 
-    const planObject = object as z.infer<typeof actionPlanResultSchema>;
+    const rawPlanObject = object as ActionPlanResult;
+    const hardTabooWords = isVanilla ? [] : collectHardTabooWords(identity, ngWordsEffective);
+    const { planObject, hits: hardTabooHits } = maskGeneratedPlan(rawPlanObject, hardTabooWords);
     const normalizedItems = sortSeriesLikeItemsBySlotOrder(
       planObject.items.map((item) => {
         const coerced = coercePlanItemBodyAndImmediate(item.body, item.immediateAction);
@@ -415,10 +481,15 @@ export async function POST(request: Request) {
         };
       }),
     );
-    const shredderHits = extractShredderHits([
-      planObject.seriesTitle,
-      ...normalizedItems.flatMap((item) => [item.body, item.immediateAction]),
-    ]);
+    const shredderHits = [
+      ...new Set([
+        ...extractShredderHits([
+          planObject.seriesTitle,
+          ...normalizedItems.flatMap((item) => [item.body, item.immediateAction]),
+        ]),
+        ...hardTabooHits,
+      ]),
+    ].slice(0, 12);
     return Response.json({
       seriesTitle: planObject.seriesTitle,
       conceptBrief: planObject.conceptBrief,
@@ -436,6 +507,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = formatAiGatewayErrorForClient(error);
     const status = getAiGatewayErrorHttpStatus(error);
+    if (message.includes("ログイン")) {
+      return Response.json({ error: message }, { status: 401 });
+    }
     return Response.json({ error: message }, { status: status === 429 ? 429 : 400 });
   }
 }

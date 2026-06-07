@@ -4,6 +4,7 @@ import {
   createGeneration,
   createGenerationSeries,
   listGenerations,
+  requireAuthenticatedActorFromRequest,
   resetAllGenerations,
   resolveRequestActor,
 } from "@/lib/supabase/services";
@@ -29,6 +30,7 @@ const conceptBriefSchema = z.object({
   audience: z.string().min(1),
   pain: z.string().min(1),
   valueProposition: z.string().min(1),
+  differentiator: z.string().optional().default(""),
   whyNow: z.string().min(1),
   whyMe: z.string().min(1),
   mvp: z.string().min(1),
@@ -76,7 +78,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const json = await request.json();
     const payload = createGenerationSchema.parse(json);
     const row =
@@ -90,18 +92,19 @@ export async function POST(request: Request) {
     }
 
     const message = error instanceof Error ? error.message : "履歴の保存に失敗しました";
-    const status = message.includes("クレジット") ? 400 : 500;
+    const status = message.includes("ログイン") ? 401 : message.includes("クレジット") ? 400 : 500;
     return Response.json({ error: message }, { status });
   }
 }
 
 export async function DELETE(request: Request) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const result = await resetAllGenerations(actor.userId);
     return Response.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "履歴の一括削除に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

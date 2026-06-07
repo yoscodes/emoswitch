@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { resolveRequestActor, updateGenerationSeriesItem } from "@/lib/supabase/services";
+import { requireAuthenticatedActorFromRequest, updateGenerationSeriesItem } from "@/lib/supabase/services";
 
 const patchSchema = z.object({
   likes: z.number().int().min(0).nullable().optional(),
@@ -13,7 +13,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const { id } = await params;
     const json = await request.json();
     const payload = patchSchema.parse(json);
@@ -25,6 +25,7 @@ export async function PATCH(
     }
 
     const message = error instanceof Error ? error.message : "連載エピソードの更新に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

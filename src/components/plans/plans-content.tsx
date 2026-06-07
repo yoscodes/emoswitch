@@ -307,7 +307,7 @@ export function PlansContent() {
         </section>
 
         <section className="mt-12 border-t pt-8 text-center text-sm text-muted-foreground">
-          <p>価格や詳細仕様は開発中の目安です。正式リリース時に調整する場合があります。</p>
+          <p>表示価格・プラン内容は購入時点で画面に表示される条件が適用されます。</p>
           <Link href="/" className="mt-3 inline-block font-medium text-primary underline-offset-4 hover:underline">
             トップへ戻る
           </Link>

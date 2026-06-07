@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { migrateLocalData, resolveRequestActor } from "@/lib/supabase/services";
+import { migrateLocalData, requireAuthenticatedActorFromRequest } from "@/lib/supabase/services";
 
 const generationSchema = z.object({
   id: z.string().uuid(),
@@ -37,7 +37,7 @@ const payloadSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const actor = await resolveRequestActor(request);
+    const actor = await requireAuthenticatedActorFromRequest(request);
     const json = await request.json();
     const payload = payloadSchema.parse(json);
     const result = await migrateLocalData(payload, actor.userId);
@@ -48,6 +48,7 @@ export async function POST(request: Request) {
     }
 
     const message = error instanceof Error ? error.message : "データ移行に失敗しました";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("ログイン") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

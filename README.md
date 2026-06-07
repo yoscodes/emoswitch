@@ -27,11 +27,60 @@
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
-   - （任意）Stripe Payment Links 用 `NEXT_PUBLIC_STRIPE_CHECKOUT_*`（`/.env.example` 参照）
+   - 課金を有効にする場合は Stripe 関連キー（`/.env.example` 参照）
 4. 開発サーバー起動
    ```bash
    npm run dev
    ```
+
+## 本番環境変数
+
+Vercel などの本番環境には、`.env.example` をチェックリストとして以下を設定します。実値を `.env.example` やGitにコミットしないでください。
+
+### 必須
+
+- `NEXT_PUBLIC_APP_URL`
+  - 本番URL。Stripe Checkout / Portal の戻り先に使います。
+- `NEXT_PUBLIC_SUPPORT_EMAIL`
+  - 問い合わせ、返金/解約、アカウント削除依頼の連絡先として表示します。
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `GOOGLE_GENERATIVE_AI_API_KEY`
+  - Gemini生成で利用します。
+- `OPENAI_API_KEY`
+  - `/api/transcribe` のWhisper文字起こしで利用します。
+
+### 課金を有効にする場合
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_UNLIMITED_MONTHLY`
+- `STRIPE_PRICE_UNLIMITED_YEARLY`
+- `BILLING_UNLIMITED_MONTHLY_ALLOWANCE_CREDITS`
+  - 未設定時は `3000`。
+- `BILLING_UNLIMITED_UPGRADE_PRORATION_CREDITS`
+  - 未設定時は `500`。
+
+`STRIPE_PRICE_PRO_MONTHLY` / `STRIPE_PRICE_PRO_YEARLY` は旧名称の互換フォールバックです。新規設定では `STRIPE_PRICE_UNLIMITED_*` を使ってください。
+
+### 任意
+
+- `NEXT_PUBLIC_STRIPE_CHECKOUT_TOPUP_20`
+  - 追加クレジット用のStripe Payment Link。未設定の場合、追加購入ボタンは無効化されます。
+- `STRIPE_HEALTHCHECK_REQUIRED`
+  - 本番でStripe課金を必須監視対象にする場合は `1`。
+- `HEALTHCHECK_TOKEN`
+  - 設定すると `/api/health` の確認にトークンが必要になります。
+
+## リリース運用
+
+- CI: `.github/workflows/ci.yml`
+  - Pull Request と `main` / `master` へのpushで `npm ci`、`npm run lint`、`npm test`、`npm run build` を実行します。
+- ヘルスチェック: `GET /api/health`
+  - 監視サービスから死活監視できます。詳細は `docs/monitoring.md` を参照してください。
+- Stripe本番E2E:
+  - Checkout、Webhook、Customer Portal、クレジット付与の確認手順は `docs/stripe-production-e2e.md` を参照してください。
 
 ## 画面構成
 
@@ -53,23 +102,30 @@
 - `POST /api/scrap-organize`
   - 入力: `draft`
   - 自由メモ（Scrap）を「誰に / どんな悩み / どう届ける / なぜ今」の解像度シートへ仮整理
+  - ログイン必須
 - `POST /api/hypothesis-canvas`
   - 入力: `draft`, `usagePurpose`, `emotion`, `intensity`, `personaKeywords`, `personaSummary`
   - 生成前の一行要約、プレビュータイトル、Identity一致率、逆質問を返す
+  - ログイン必須
 - `POST /api/generate-triple`
   - 入力: `draft`, `usagePurpose`, `strategyGoal`, `emotion`, `intensity`, `ngWords`, `audience`, `pain`, `firstExperiment`, `whyNow`, `whyMe`
   - JSONで **Concept Brief + 最初の3アクション** を生成
+  - ログイン必須
 - `POST /api/transcribe`
   - 入力: `FormData(audio)`
   - Whisperで日本語文字起こし
+  - ログイン必須
 - `GET/POST /api/generations`
   - Concept Brief + 実行プランの保存・取得
+  - 保存・削除はログイン必須
 - `GET /api/archive/insights`
   - Roadmap/Identity用の履歴・集計データを取得
-- `GET/POST /api/ghost-settings`
+- `GET/PUT /api/ghost-settings`
   - My Taboo、スタンスメモ、NGワード、Identity補助情報を保存
+  - 保存はログイン必須
 - `POST /api/persona/analyze`
   - 実行メモやMy TabooからIdentityを再分析
+  - ログイン必須
 - `GET /api/credits`
   - 生成クレジット・日次上限・プラン能力を取得
 - `POST /api/stripe/checkout`, `POST /api/stripe/portal`, `POST /api/stripe/webhook`
