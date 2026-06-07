@@ -1216,6 +1216,21 @@ async function requireGenerationSeriesById(id: string, userId?: string): Promise
 export async function ensureDemoUser(): Promise<string> {
   if (!demoUserPromise) {
     demoUserPromise = (async () => {
+      const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("id", DEMO_USER_ID)
+        .maybeSingle<{ id: string }>();
+
+      if (existingProfileError) {
+        throw existingProfileError;
+      }
+
+      if (existingProfile) {
+        markUserEnsured(DEMO_USER_ID);
+        return DEMO_USER_ID;
+      }
+
       const { error: createError } = await supabaseAdmin.auth.admin.createUser({
         id: DEMO_USER_ID,
         email: DEMO_USER_EMAIL,
